@@ -620,81 +620,74 @@ const App: React.FC = () => {
     }
   };
 
-  // IMPORTANT: If the header with `position: fixed` is still scrolling,
-  // it's highly likely that one of its ANCESTOR elements in the DOM
-  // (e.g., div#root, body, or even html) has a CSS `transform`, `filter`,
-  // or `perspective` property applied. These properties create a new
-  // "containing block", causing `fixed` elements to behave as if they are
-  // `absolute` positioned relative to that ancestor, not the viewport.
-  // Use browser developer tools to inspect all ancestors of the header.
   const renderHeader = () => (
-    <header className="bg-headerBlue-DEFAULT dark:bg-dark-headerBg text-neutral-dark dark:text-dark-text p-6 shadow-md fixed top-0 left-0 w-full z-40">
+    <header className="bg-headerBlue-DEFAULT dark:bg-dark-headerBg text-neutral-dark dark:text-dark-text p-3 sm:p-6 shadow-md sticky top-0 z-40">
       <div className="container mx-auto flex flex-col sm:flex-row justify-between items-center">
         <h1
-          className="text-3xl font-quicksand font-bold tracking-tight cursor-pointer hover:text-opacity-80 dark:hover:text-opacity-80 transition-opacity"
+          className="text-xl sm:text-3xl font-quicksand font-bold tracking-tight cursor-pointer hover:text-opacity-80 dark:hover:text-opacity-80 transition-opacity"
           onClick={() => navigateTo(View.Home)}
         >
           ✨ หาจ๊อบจ้า ✨
         </h1>
-        <nav className="mt-4 sm:mt-0 flex flex-wrap items-center justify-center sm:justify-end gap-2">
+        <nav className="mt-2 sm:mt-0 flex items-center justify-center sm:justify-end gap-2 overflow-x-auto whitespace-nowrap sm:flex-wrap sm:whitespace-normal sm:overflow-x-visible pb-1 sm:pb-0">
           {currentUser ? (
             <>
-              <span className="text-sm font-medium mr-1">สวัสดี, @{currentUser.displayName}!</span>
+              <span className="text-sm font-medium mr-1 flex-shrink-0">สวัสดี, @{currentUser.displayName}!</span>
               {currentUser.isAdmin && (
-                <Button onClick={() => navigateTo(View.AdminDashboard)} variant="accent" size="sm">
+                <Button onClick={() => navigateTo(View.AdminDashboard)} variant="accent" size="sm" className="flex-shrink-0">
                   🔐 Admin
                 </Button>
               )}
               {currentView !== View.UserProfile && (
-                <Button onClick={() => navigateTo(View.UserProfile)} variant="outline" colorScheme="secondary" size="sm">
+                <Button onClick={() => navigateTo(View.UserProfile)} variant="outline" colorScheme="secondary" size="sm" className="flex-shrink-0">
                   👤 โปรไฟล์ของฉัน
                 </Button>
               )}
               {!currentUser.isAdmin && currentView !== View.MyPosts && (
-                 <Button onClick={() => navigateTo(View.MyPosts)} variant="outline" colorScheme="primary" size="sm">
+                 <Button onClick={() => navigateTo(View.MyPosts)} variant="outline" colorScheme="primary" size="sm" className="flex-shrink-0">
                     📁 โพสต์ของฉัน
                   </Button>
               )}
-              <Button onClick={handleLogout} variant="outline" colorScheme="accent" size="sm">ออกจากระบบ</Button>
+              <Button onClick={handleLogout} variant="outline" colorScheme="accent" size="sm" className="flex-shrink-0">ออกจากระบบ</Button>
             </>
           ) : (
             <>
-              <Button onClick={() => navigateTo(View.Login)} variant="primary" size="sm">เข้าสู่ระบบ</Button>
-              <Button onClick={() => navigateTo(View.Register)} variant="outline" colorScheme="primary" size="sm">ลงทะเบียน</Button>
+              <Button onClick={() => navigateTo(View.Login)} variant="primary" size="sm" className="flex-shrink-0">เข้าสู่ระบบ</Button>
+              <Button onClick={() => navigateTo(View.Register)} variant="outline" colorScheme="primary" size="sm" className="flex-shrink-0">ลงทะเบียน</Button>
             </>
           )}
            {currentView !== View.Home && (
-            <Button onClick={() => navigateTo(View.Home)} variant="secondary" size="sm" className="ml-auto sm:ml-2">
+            <Button onClick={() => navigateTo(View.Home)} variant="secondary" size="sm" className="ml-auto sm:ml-2 flex-shrink-0">
               🏠 หน้าแรก
             </Button>
           )}
           {currentUser && currentView !== View.FindJobs && currentView !== View.PostJob && (
-            <Button onClick={() => navigateTo(View.FindJobs)} variant="secondary" size="sm">
+            <Button onClick={() => navigateTo(View.FindJobs)} variant="secondary" size="sm" className="flex-shrink-0">
               👀 หางาน
             </Button>
           )}
            {currentUser && currentView === View.FindJobs && (
-             <Button onClick={() => { setSourceViewForForm(View.FindJobs); navigateTo(View.PostJob);}} variant="accent" size="sm">
+             <Button onClick={() => { setSourceViewForForm(View.FindJobs); navigateTo(View.PostJob);}} variant="accent" size="sm" className="flex-shrink-0">
               + ลงประกาศงาน
             </Button>
           )}
            {currentUser && currentView === View.PostJob && !itemToEdit && (
-             <Button onClick={() => navigateTo(View.FindJobs)} variant="secondary" size="sm">
+             <Button onClick={() => navigateTo(View.FindJobs)} variant="secondary" size="sm" className="flex-shrink-0">
               👀 หางาน
             </Button>
           )}
           {currentUser && currentView !== View.FindHelpers && currentView !== View.OfferHelp && (
-            <Button onClick={() => navigateTo(View.FindHelpers)} variant="secondary" size="sm">
+            <Button onClick={() => navigateTo(View.FindHelpers)} variant="secondary" size="sm" className="flex-shrink-0">
               🫂 ค้นหาผู้ช่วย
             </Button>
           )}
           {currentUser && currentView === View.FindHelpers && (
-             <Button onClick={() => { setSourceViewForForm(View.FindHelpers); navigateTo(View.OfferHelp);}} variant="accent" size="sm">
+             <Button onClick={() => { setSourceViewForForm(View.FindHelpers); navigateTo(View.OfferHelp);}} variant="accent" size="sm" className="flex-shrink-0">
               + เสนอตัวช่วยงาน
             </Button>
           )}
            {currentUser && currentView === View.OfferHelp && !itemToEdit && (
-             <Button onClick={() => navigateTo(View.FindHelpers)} variant="secondary" size="sm">
+             <Button onClick={() => navigateTo(View.FindHelpers)} variant="secondary" size="sm" className="flex-shrink-0">
               🫂 ค้นหาผู้ช่วย
             </Button>
           )}
@@ -971,9 +964,10 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-light dark:bg-dark-pageBg flex flex-col">
+    <div className="min-h-screen bg-neutral-light dark:bg-dark-pageBg">
       {renderHeader()}
-      <main className="flex-grow pt-28"> {/* Ensure this padding is sufficient for your header height */}
+      {/* The main content area no longer needs explicit top padding for a sticky header */}
+      <main> 
         {currentViewContent}
       </main>
       <ConfirmModal

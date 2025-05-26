@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { Job, HelperProfile, User } from './types';
 import type { AdminItem as AdminItemType } from './components/AdminDashboard';
 import { View, GenderOption, HelperEducationLevelOption } from './types';
@@ -159,6 +159,10 @@ const App: React.FC = () => {
   const [editingItemType, setEditingItemType] = useState<'job' | 'profile' | null>(null);
   const [sourceViewForForm, setSourceViewForForm] = useState<View | null>(null);
 
+  const lastScrollYRef = useRef(0);
+  const [headerVisible, setHeaderVisible] = useState(true);
+  const headerRef = useRef<HTMLElement>(null);
+
 
   useEffect(() => {
     if (theme === 'dark') {
@@ -199,9 +203,48 @@ const App: React.FC = () => {
     localStorage.setItem('chiangMaiQuickHelpers', JSON.stringify(helperProfiles));
   }, [helperProfiles]);
 
+
+  useEffect(() => {
+    lastScrollYRef.current = window.scrollY;
+
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      const localLastScrollY = lastScrollYRef.current;
+
+      const scrollDownThreshold = 20; // Min px to scroll down to hide
+      const scrollUpThreshold = 5;   // Min px to scroll up to show
+      const headerActualHeight = headerRef.current?.offsetHeight || 70; // Default height
+
+      if (currentScrollY < localLastScrollY && (localLastScrollY - currentScrollY) > scrollUpThreshold) {
+        // Scrolling Up
+        if (!headerVisible) setHeaderVisible(true);
+      } else if (currentScrollY > localLastScrollY && (currentScrollY - localLastScrollY) > scrollDownThreshold) {
+        // Scrolling Down
+        if (currentScrollY > headerActualHeight) { // Only hide if scrolled past where header was
+          if (headerVisible) setHeaderVisible(false);
+        }
+      }
+
+      // Always show if near the top, this can override the hiding logic
+      if (currentScrollY <= headerActualHeight / 2) {
+        if (!headerVisible) setHeaderVisible(true);
+      }
+
+      lastScrollYRef.current = currentScrollY <= 0 ? 0 : currentScrollY;
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, [headerVisible]); // Rerun if headerVisible changes to ensure setHeaderVisible has fresh prev state
+
+
   const navigateTo = (view: View) => {
     setCurrentView(view);
     window.scrollTo(0, 0);
+    // After navigation, header should be visible
+    if (!headerVisible) setHeaderVisible(true); 
   };
 
   const handleRegister = (userData: Omit<User, 'id' | 'hashedPassword' | 'isAdmin'> & { password: string }) => {
@@ -446,7 +489,7 @@ const App: React.FC = () => {
     navigateTo(sourceViewForForm === View.MyPosts ? View.MyPosts : View.FindJobs);
     setSourceViewForForm(null);
     alert('ประกาศงานของคุณถูกเพิ่มเรียบร้อยแล้ว!');
-  }, [currentUser, sourceViewForForm, navigateTo]);
+  }, [currentUser, sourceViewForForm, navigateTo, headerVisible]); // Added headerVisible
 
   const handleAddHelperProfile = useCallback((newProfileData: HelperProfileFormData) => {
     if (!currentUser) {
@@ -480,7 +523,7 @@ const App: React.FC = () => {
     navigateTo(sourceViewForForm === View.MyPosts ? View.MyPosts : View.FindHelpers);
     setSourceViewForForm(null);
     alert('โปรไฟล์ของคุณถูกเพิ่มเรียบร้อยแล้ว!');
-  }, [currentUser, sourceViewForForm, navigateTo]);
+  }, [currentUser, sourceViewForForm, navigateTo, headerVisible]); // Added headerVisible
 
 
   const openConfirmModal = (title: string, message: string, onConfirm: () => void) => {
@@ -621,13 +664,20 @@ const App: React.FC = () => {
   };
 
   const renderHeader = () => (
-    <header className="bg-headerBlue-DEFAULT dark:bg-dark-headerBg text-neutral-dark dark:text-dark-text p-3 sm:p-6 shadow-md sticky top-0 z-40">
+    <header
+      ref={headerRef}
+      className={`bg-headerBlue-DEFAULT dark:bg-dark-headerBg text-neutral-dark dark:text-dark-text p-3 sm:p-6 shadow-md sticky top-0 z-40 transition-transform duration-300 ease-in-out ${
+        !headerVisible ? '-translate-y-full' : 'translate-y-0'
+      }`}
+      aria-hidden={!headerVisible}
+    >
       <div className="container mx-auto flex flex-col sm:flex-row justify-between items-center">
         <h1
           className="text-xl sm:text-3xl font-quicksand font-bold tracking-tight cursor-pointer hover:text-opacity-80 dark:hover:text-opacity-80 transition-opacity"
           onClick={() => navigateTo(View.Home)}
+          aria-label="ไปหน้าแรก"
         >
-          ✨ หาจ๊อบจ้า ✨
+          {/* ✨ หาจ๊อบจ้า ✨ (Removed) */}
         </h1>
         <nav className="mt-2 sm:mt-0 flex items-center justify-center sm:justify-end gap-2 overflow-x-auto whitespace-nowrap sm:flex-wrap sm:whitespace-normal sm:overflow-x-visible pb-1 sm:pb-0">
           {currentUser ? (
@@ -966,7 +1016,6 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-neutral-light dark:bg-dark-pageBg">
       {renderHeader()}
-      {/* The main content area no longer needs explicit top padding for a sticky header */}
       <main> 
         {currentViewContent}
       </main>
@@ -979,14 +1028,13 @@ const App: React.FC = () => {
       />
       <footer className="bg-headerBlue-DEFAULT dark:bg-dark-headerBg text-center text-neutral-dark dark:text-dark-text p-4 mt-auto font-normal">
         <div className="container mx-auto flex flex-col sm:flex-row justify-center items-center gap-x-6 gap-y-2">
-            <p>&copy; {new Date().getFullYear()} หาจ๊อบจ้า</p>
+            {/* <p>หาจ๊อบจ้า</p> (Removed) */}
             <button
                 onClick={() => navigateTo(View.AboutUs)}
                 className="hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
             >
                 เกี่ยวกับเรา
             </button>
-            <p className="text-xs hidden sm:block">พัฒนาเพื่อชุมชนคนเชียงใหม่</p>
         </div>
       </footer>
       <button

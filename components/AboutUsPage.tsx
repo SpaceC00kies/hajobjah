@@ -1,10 +1,11 @@
+
 import React from 'react';
 
 export const AboutUsPage: React.FC = () => {
   return (
     <div className="container mx-auto p-6 sm:p-10 max-w-3xl my-8">
       <div className="bg-white dark:bg-dark-cardBg shadow-xl rounded-xl p-8 md:p-12 border border-neutral-DEFAULT dark:border-dark-border">
-        <h2 className="text-3xl sm:text-4xl font-quicksand font-bold text-primary dark:text-dark-primary-DEFAULT mb-6 text-center">
+        <h2 className="text-2xl sm:text-3xl font-quicksand font-bold text-primary dark:text-dark-primary-DEFAULT mb-6 text-center whitespace-nowrap">
           ✨ เกี่ยวกับหาจ๊อบจ้า ✨
         </h2>
 

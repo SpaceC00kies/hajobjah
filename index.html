@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>✨ หาจ๊อบจ้า ✨ - งานด่วน หางานเชียงใหม่</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        darkMode: 'class', // Enable class-based dark mode
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Sarabun', 'sans-serif'],
+              quicksand: ['Quicksand', 'sans-serif'],
+            },
+            colors: {
+              // Light mode colors
+              primary: {
+                DEFAULT: '#A0D9E0', // Pastel Blue
+                hover: '#8BCBD3',
+              },
+              secondary: {
+                DEFAULT: '#FADB4E', // Updated: Deeper Soft Yellow
+                hover: '#F8D43A',   // Updated: Hover for new yellow
+              },
+              accent: {
+                DEFAULT: '#FCD5CE', // Peach
+                hover: '#FABFB5',
+              },
+              neutral: {
+                light: '#FAFAF4',    // Updated: Off-white (Page BG - Light)
+                DEFAULT: '#E0E0E0',  // Light Gray (Borders - Light)
+                dark: '#333333',     // Dark Gray (Main Text - Light)
+                medium: '#666666',   // Softer Secondary Text - Light / Timestamp color
+              },
+              headerBlue: {
+                DEFAULT: '#DFF6F3', // Pastel Mint-Blue for header - Light
+                hover: '#CEEBE6'
+              },
+
+              // Dark mode specific colors
+              dark: {
+                pageBg: '#1E1E1E',    // Soft Charcoal (Page BG - Dark)
+                cardBg: '#2A2A2A',    // Dark Slate (Card BG - Dark)
+                inputBg: '#333333',   // Slightly Lighter Dark (Input BG - Dark)
+                border: '#555555',    // Dark Gray (Borders - Dark)
+                text: '#EEEEEE',      // Off-White (Main Text - Dark)
+                textMuted: '#BBBBBB', // Lighter Gray (Secondary Text - Dark)
+                
+                // Specific text colors for buttons in dark mode for high contrast
+                textOnPrimaryDark: '#1A1A1A', // For blue buttons
+                textOnSecondaryDark: '#2B2B2B', // For yellow buttons
+                textOnAccentDark: '#1A1A1A',   // For peach buttons
+
+                primary: {            // Dark Pastel Blue
+                  DEFAULT: '#78C5D1',
+                  hover: '#6AB8C4',
+                },
+                secondary: {          // Dark Muted Yellow
+                  DEFAULT: '#F0C95D', // Updated: Dark Muted Yellow
+                  hover: '#E8BF4A',   // Updated: Hover for new dark yellow
+                },
+                accent: {             // Dark Peach for Theme Toggle
+                  DEFAULT: '#F2B8AC', 
+                  hover: '#EAA89F', // Derived hover for new peach
+                },
+                headerBg: '#252525', // Specific dark header background
+              }
+            }
+          }
+        }
+      }
+    </script>
+  <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai@^1.0.1",
+    "react": "https://esm.sh/react@^19.1.0",
+    "react/": "https://esm.sh/react@^19.1.0/",
+    "react-dom/": "https://esm.sh/react-dom@^19.1.0/"
+  }
+}
+</script>
+</head>
+  <body class="bg-neutral-light dark:bg-dark-pageBg font-sans text-neutral-dark dark:text-dark-text">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html><link rel="stylesheet" href="index.css">
+<script src="index.tsx" type="module"></script>

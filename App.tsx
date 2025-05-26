@@ -211,21 +211,18 @@ const App: React.FC = () => {
       const currentScrollY = window.scrollY;
       const localLastScrollY = lastScrollYRef.current;
 
-      const scrollDownThreshold = 20; // Min px to scroll down to hide
-      const scrollUpThreshold = 5;   // Min px to scroll up to show
-      const headerActualHeight = headerRef.current?.offsetHeight || 70; // Default height
+      const scrollDownThreshold = 20; 
+      const scrollUpThreshold = 5;   
+      const headerActualHeight = headerRef.current?.offsetHeight || 70; 
 
       if (currentScrollY < localLastScrollY && (localLastScrollY - currentScrollY) > scrollUpThreshold) {
-        // Scrolling Up
         if (!headerVisible) setHeaderVisible(true);
       } else if (currentScrollY > localLastScrollY && (currentScrollY - localLastScrollY) > scrollDownThreshold) {
-        // Scrolling Down
-        if (currentScrollY > headerActualHeight) { // Only hide if scrolled past where header was
+        if (currentScrollY > headerActualHeight) { 
           if (headerVisible) setHeaderVisible(false);
         }
       }
 
-      // Always show if near the top, this can override the hiding logic
       if (currentScrollY <= headerActualHeight / 2) {
         if (!headerVisible) setHeaderVisible(true);
       }
@@ -237,13 +234,12 @@ const App: React.FC = () => {
     return () => {
       window.removeEventListener('scroll', handleScroll);
     };
-  }, [headerVisible]); // Rerun if headerVisible changes to ensure setHeaderVisible has fresh prev state
+  }, [headerVisible]); 
 
 
   const navigateTo = (view: View) => {
     setCurrentView(view);
     window.scrollTo(0, 0);
-    // After navigation, header should be visible
     if (!headerVisible) setHeaderVisible(true); 
   };
 
@@ -489,7 +485,7 @@ const App: React.FC = () => {
     navigateTo(sourceViewForForm === View.MyPosts ? View.MyPosts : View.FindJobs);
     setSourceViewForForm(null);
     alert('ประกาศงานของคุณถูกเพิ่มเรียบร้อยแล้ว!');
-  }, [currentUser, sourceViewForForm, navigateTo, headerVisible]); // Added headerVisible
+  }, [currentUser, sourceViewForForm, navigateTo, headerVisible]); 
 
   const handleAddHelperProfile = useCallback((newProfileData: HelperProfileFormData) => {
     if (!currentUser) {
@@ -523,7 +519,7 @@ const App: React.FC = () => {
     navigateTo(sourceViewForForm === View.MyPosts ? View.MyPosts : View.FindHelpers);
     setSourceViewForForm(null);
     alert('โปรไฟล์ของคุณถูกเพิ่มเรียบร้อยแล้ว!');
-  }, [currentUser, sourceViewForForm, navigateTo, headerVisible]); // Added headerVisible
+  }, [currentUser, sourceViewForForm, navigateTo, headerVisible]); 
 
 
   const openConfirmModal = (title: string, message: string, onConfirm: () => void) => {
@@ -679,7 +675,7 @@ const App: React.FC = () => {
         >
           {/* ✨ หาจ๊อบจ้า ✨ (Removed) */}
         </h1>
-        <nav className="mt-2 sm:mt-0 flex items-center justify-center sm:justify-end gap-2 overflow-x-auto whitespace-nowrap sm:flex-wrap sm:whitespace-normal sm:overflow-x-visible pb-1 sm:pb-0">
+        <nav className="mt-2 sm:mt-0 flex items-center justify-center sm:justify-end gap-2 overflow-x-auto whitespace-nowrap sm:flex-wrap sm:whitespace-normal sm:overflow-x-visible pb-1 sm:pb-0 w-full sm:w-auto">
           {currentUser ? (
             <>
               <span className="text-sm font-medium mr-1 flex-shrink-0">สวัสดี, @{currentUser.displayName}!</span>

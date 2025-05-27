@@ -1,7 +1,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 // import firebase from 'firebase/compat/app'; // Removed unused V8 compat import
-import { auth, db, storage } from "../firebase"; // Existing Firebase setup
+import { auth, db, storage } from "./firebase"; // Existing Firebase setup
 import type { User as FirebaseUser } from 'firebase/auth'; // Firebase Auth User type
 import {
   createUserWithEmailAndPassword,

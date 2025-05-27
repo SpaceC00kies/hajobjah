@@ -1,14 +1,4 @@
 
-
-
-
-
-
-
-
-
-
-
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { Job, HelperProfile, User, EnrichedHelperProfile } from './types';
 import type { AdminItem as AdminItemType } from './components/AdminDashboard';
@@ -1155,7 +1145,14 @@ const App: React.FC = () => {
               {feedbackSubmissionMessage}
           </div>
       )}
-      <footer className="bg-headerBlue-DEFAULT dark:bg-dark-headerBg text-neutral-dark dark:text-dark-text p-4 mt-auto font-normal">
+      <footer className="bg-headerBlue-DEFAULT dark:bg-dark-headerBg text-neutral-dark dark:text-dark-text p-4 mt-auto font-normal flex flex-col items-center">
+        <button
+          onClick={toggleTheme}
+          className="py-2 px-3 rounded-full bg-headerBlue-DEFAULT text-neutral-dark dark:bg-dark-inputBg dark:text-dark-text text-lg shadow-lg hover:bg-headerBlue-hover dark:hover:bg-dark-border hover:scale-105 hover:shadow-xl transform transition-all duration-150 ease-in-out mb-3"
+          aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+        >
+          {theme === 'light' ? '🌙' : '☀️'}
+        </button>
         <div className="container mx-auto flex flex-row flex-wrap justify-center items-center gap-x-1 sm:gap-x-2 gap-y-1 text-xs sm:text-sm">
             <button
                 onClick={() => navigateTo(View.AboutUs)}
@@ -1185,14 +1182,8 @@ const App: React.FC = () => {
                 อยากให้เราปรับปรุงอะไร?
             </button>
         </div>
+        {/* Social media icons removed from here */}
       </footer>
-      <button
-        onClick={toggleTheme}
-        className="fixed bottom-5 right-5 z-50 py-2 px-3 rounded-full bg-headerBlue-DEFAULT text-neutral-dark dark:bg-dark-inputBg dark:text-dark-text text-lg shadow-lg hover:bg-headerBlue-hover dark:hover:bg-dark-border hover:scale-105 hover:shadow-xl transform transition-all duration-150 ease-in-out"
-        aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-      >
-        {theme === 'light' ? '🌙' : '☀️'}
-      </button>
     </div>
   );
 };

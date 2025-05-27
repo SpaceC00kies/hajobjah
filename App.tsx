@@ -5,6 +5,10 @@
 
 
 
+
+
+
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { Job, HelperProfile, User, EnrichedHelperProfile } from './types';
 import type { AdminItem as AdminItemType } from './components/AdminDashboard';
@@ -1184,10 +1188,10 @@ const App: React.FC = () => {
       </footer>
       <button
         onClick={toggleTheme}
-        className="fixed bottom-5 right-5 z-50 py-2 px-3 rounded-full bg-accent text-neutral-dark dark:text-dark-textOnAccentDark text-sm font-semibold shadow-lg hover:scale-105 hover:shadow-xl transform transition-all duration-150 ease-in-out"
-        aria-label="Toggle theme"
+        className="fixed bottom-5 right-5 z-50 py-2 px-3 rounded-full bg-headerBlue-DEFAULT text-neutral-dark dark:bg-dark-inputBg dark:text-dark-text text-lg shadow-lg hover:bg-headerBlue-hover dark:hover:bg-dark-border hover:scale-105 hover:shadow-xl transform transition-all duration-150 ease-in-out"
+        aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
       >
-        {'🌙 | ☀️'}
+        {theme === 'light' ? '🌙' : '☀️'}
       </button>
     </div>
   );

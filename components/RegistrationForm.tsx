@@ -1,10 +1,11 @@
+
 import React, { useState } from 'react';
 import type { User } from '../types';
 import { GenderOption, HelperEducationLevelOption } from '../types';
 import { Button } from './Button';
 
 interface RegistrationFormProps {
-  onRegister: (userData: Omit<User, 'id' | 'hashedPassword' | 'isAdmin'> & { password: string }) => boolean; // Returns true on success
+  onRegister: (userData: Omit<User, 'id' | 'hashedPassword' | 'isAdmin' | 'photo' | 'address'> & { password: string }) => boolean; // Returns true on success
   onSwitchToLogin: () => void;
 }
 
@@ -98,9 +99,10 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onRegister, 
     setErrors({}); 
     if (!validateForm()) return;
 
+    // Pass undefined for photo and address as they are not collected at registration
     const success = onRegister({ 
         displayName, username, email, password, mobile, lineId, facebook,
-        gender, birthdate, educationLevel 
+        gender, birthdate, educationLevel
     });
     if (success) {
       setDisplayName('');

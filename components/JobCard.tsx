@@ -1,10 +1,13 @@
+
 import React, { useState } from 'react';
 import type { Job } from '../types';
+import { View } from '../types'; // Import View
 import { Button } from './Button';
 import { Modal } from './Modal'; 
 
 interface JobCardProps {
   job: Job;
+  navigateTo: (view: View) => void; // Add navigateTo prop
 }
 
 const formatDateDisplay = (dateString?: string): string | null => {
@@ -22,7 +25,7 @@ const formatDateDisplay = (dateString?: string): string | null => {
   }
 };
 
-export const JobCard: React.FC<JobCardProps> = ({ job }) => {
+export const JobCard: React.FC<JobCardProps> = ({ job, navigateTo }) => {
   const [isInterestModalOpen, setIsInterestModalOpen] = useState(false);
   const [isWarningModalOpen, setIsWarningModalOpen] = useState(false);
 
@@ -184,12 +187,22 @@ export const JobCard: React.FC<JobCardProps> = ({ job }) => {
 
       <Modal isOpen={isWarningModalOpen} onClose={closeWarningModal} title="⚠️ โปรดระวังมิจฉาชีพ">
         <div className="bg-accent/10 dark:bg-dark-accent-DEFAULT/10 border border-accent/30 dark:border-dark-accent-DEFAULT/30 p-4 rounded-md my-2 text-neutral-dark dark:text-dark-textMuted">
-          <p className="mb-2">หาจ๊อบจ้าเป็นเพียงสื่อกลางในการเชื่อมต่อผู้ว่าจ้างและผู้สมัคร</p>
-          <p className="mb-2 font-semibold text-red-600 dark:text-red-400">โปรดอย่าโอนเงินล่วงหน้าโดยเด็ดขาด</p>
-          <p>หากเกิดความเสียหาย ทางเว็บจะไม่รับผิดชอบใด ๆ ทั้งสิ้น</p>
+          <p className="mb-2">⚠️ โปรดใช้ความระมัดระวัง <strong className="text-red-600 dark:text-red-400">ห้ามโอนเงินก่อนเริ่มงาน</strong> และควรนัดเจอในที่ปลอดภัย</p>
+          <p>
+            หาจ๊อบจ้าเป็นเพียงพื้นที่ให้คนเจอกัน โปรดใช้วิจารณญาณในการติดต่อ ฉบับเต็มโปรดอ่านที่หน้า {" "}
+            <button
+              onClick={() => {
+                closeWarningModal();
+                navigateTo(View.Safety);
+              }}
+              className="text-accent dark:text-dark-accent-DEFAULT hover:underline font-semibold"
+            >
+              "โปรดอ่านเพื่อความปลอดภัย"
+            </button>
+          </p>
         </div>
         <Button onClick={handleProceedToContact} variant="accent" className="w-full mt-4">
-          เข้าใจแล้ว
+          เข้าใจแล้ว ดำเนินการต่อ
         </Button>
       </Modal>
 

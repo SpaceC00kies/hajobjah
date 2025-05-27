@@ -83,6 +83,17 @@ export interface User {
   gender?: GenderOption;
   birthdate?: string; // YYYY-MM-DD
   educationLevel?: HelperEducationLevelOption;
+  photo?: string; // Base64 string for profile photo
+  address?: string; // User's address
+
+  // Personality fields
+  favoriteMusic?: string;
+  favoriteBook?: string;
+  favoriteMovie?: string;
+  hobbies?: string;
+  favoriteFood?: string;
+  dislikedThing?: string;
+  introSentence?: string;
 }
 
 export enum View {
@@ -97,6 +108,8 @@ export enum View {
   MyPosts = 'MY_POSTS',
   UserProfile = 'USER_PROFILE',
   AboutUs = 'ABOUT_US',
+  PublicProfile = 'PUBLIC_PROFILE',
+  Safety = 'SAFETY', // New view for Safety Page
 }
 
 export interface AIPromptDetails {
@@ -104,4 +117,11 @@ export interface AIPromptDetails {
   locationDetails: string;
   schedule: string;
   compensationDetails: string;
+}
+
+// For enriching HelperProfile data for display in cards
+export interface EnrichedHelperProfile extends HelperProfile {
+  userPhoto?: string;
+  userAddress?: string; // Could be a snippet or full address depending on context
+  userDisplayName: string;
 }

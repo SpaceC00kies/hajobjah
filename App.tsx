@@ -1,6 +1,7 @@
 
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import type { Job, HelperProfile, User } from './types';
+import type { Job, HelperProfile, User, EnrichedHelperProfile } from './types';
 import type { AdminItem as AdminItemType } from './components/AdminDashboard';
 import { View, GenderOption, HelperEducationLevelOption } from './types';
 import { PostJobForm } from './components/PostJobForm';
@@ -15,6 +16,8 @@ import { ConfirmModal } from './components/ConfirmModal';
 import { MyPostsPage } from './components/MyPostsPage';
 import { UserProfilePage } from './components/UserProfilePage';
 import { AboutUsPage } from './components/AboutUsPage';
+import { PublicProfilePage } from './components/PublicProfilePage';
+import { SafetyPage } from './components/SafetyPage'; // New Import
 
 type Theme = 'light' | 'dark';
 const ADMIN_USERNAME = "admin";
@@ -30,6 +33,7 @@ export const isValidThaiMobileNumberUtil = (mobile: string): boolean => {
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>(View.Home);
   const [theme, setTheme] = useState<Theme>('light');
+  const [viewingProfileId, setViewingProfileId] = useState<string | null>(null); // For public profile
 
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [confirmModalMessage, setConfirmModalMessage] = useState('');
@@ -51,6 +55,10 @@ const App: React.FC = () => {
       gender: GenderOption.NotSpecified,
       birthdate: '1990-01-01',
       educationLevel: HelperEducationLevelOption.Bachelor,
+      photo: undefined,
+      address: undefined,
+      favoriteMusic: 'Classical',
+      hobbies: 'Reading, Coding',
     };
     const testUser: User = {
       id: 'test-user-002',
@@ -65,6 +73,10 @@ const App: React.FC = () => {
       gender: GenderOption.Male,
       birthdate: '1995-05-15',
       educationLevel: HelperEducationLevelOption.HighSchool,
+      photo: undefined,
+      address: '123 Mymoo Road, Chiang Mai',
+      favoriteMovie: 'Inception',
+      introSentence: 'I am a friendly and hardworking individual.',
     };
 
     if (savedUsers) {
@@ -82,14 +94,23 @@ const App: React.FC = () => {
                 gender: u.gender || GenderOption.NotSpecified,
                 birthdate: u.birthdate || undefined,
                 educationLevel: u.educationLevel || HelperEducationLevelOption.NotStated,
+                photo: u.photo || undefined,
+                address: u.address || undefined,
+                favoriteMusic: u.favoriteMusic || undefined,
+                favoriteBook: u.favoriteBook || undefined,
+                favoriteMovie: u.favoriteMovie || undefined,
+                hobbies: u.hobbies || undefined,
+                favoriteFood: u.favoriteFood || undefined,
+                dislikedThing: u.dislikedThing || undefined,
+                introSentence: u.introSentence || undefined,
             };
             if (u.username === ADMIN_USERNAME && u.email === ADMIN_EMAIL) {
               adminExists = true;
-              return { ...baseUser, ...adminUser };
+              return { ...baseUser, ...adminUser, photo: u.photo || adminUser.photo, address: u.address || adminUser.address, favoriteMusic: u.favoriteMusic || adminUser.favoriteMusic, hobbies: u.hobbies || adminUser.hobbies };
             }
             if (u.username === 'test' && u.email === 'test@user.com') {
               regularTestUserExists = true;
-              return { ...baseUser, ...testUser };
+              return { ...baseUser, ...testUser, photo: u.photo || testUser.photo, address: u.address || testUser.address, favoriteMovie: u.favoriteMovie || testUser.favoriteMovie, introSentence: u.introSentence || testUser.introSentence };
             }
             return baseUser;
           });
@@ -159,11 +180,6 @@ const App: React.FC = () => {
   const [editingItemType, setEditingItemType] = useState<'job' | 'profile' | null>(null);
   const [sourceViewForForm, setSourceViewForForm] = useState<View | null>(null);
 
-  const lastScrollYRef = useRef(0);
-  const [headerVisible, setHeaderVisible] = useState(true);
-  const headerRef = useRef<HTMLElement>(null);
-
-
   useEffect(() => {
     if (theme === 'dark') {
       document.documentElement.classList.add('dark');
@@ -186,8 +202,9 @@ const App: React.FC = () => {
       if (liveUser) {
         localStorage.setItem('chiangMaiQuickCurrentUser', JSON.stringify(liveUser));
       } else {
+        // User might have been deleted by admin, log them out
         localStorage.removeItem('chiangMaiQuickCurrentUser');
-        setCurrentUser(null);
+        setCurrentUser(null); 
       }
     } else {
       localStorage.removeItem('chiangMaiQuickCurrentUser');
@@ -204,46 +221,21 @@ const App: React.FC = () => {
   }, [helperProfiles]);
 
 
-  useEffect(() => {
-    lastScrollYRef.current = window.scrollY;
-
-    const handleScroll = () => {
-      const currentScrollY = window.scrollY;
-      const localLastScrollY = lastScrollYRef.current;
-
-      const scrollDownThreshold = 20; 
-      const scrollUpThreshold = 5;   
-      const headerActualHeight = headerRef.current?.offsetHeight || 70; 
-
-      if (currentScrollY < localLastScrollY && (localLastScrollY - currentScrollY) > scrollUpThreshold) {
-        if (!headerVisible) setHeaderVisible(true);
-      } else if (currentScrollY > localLastScrollY && (currentScrollY - localLastScrollY) > scrollDownThreshold) {
-        if (currentScrollY > headerActualHeight) { 
-          if (headerVisible) setHeaderVisible(false);
-        }
-      }
-
-      if (currentScrollY <= headerActualHeight / 2) {
-        if (!headerVisible) setHeaderVisible(true);
-      }
-
-      lastScrollYRef.current = currentScrollY <= 0 ? 0 : currentScrollY;
-    };
-
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => {
-      window.removeEventListener('scroll', handleScroll);
-    };
-  }, [headerVisible]); 
-
-
-  const navigateTo = (view: View) => {
+  const navigateTo = (view: View, payload?: any) => {
+    if (view === View.PublicProfile && typeof payload === 'string') {
+      setViewingProfileId(payload);
+    } else {
+      setViewingProfileId(null); 
+    }
     setCurrentView(view);
     window.scrollTo(0, 0);
-    if (!headerVisible) setHeaderVisible(true); 
+  };
+  
+  const handleNavigateToPublicProfile = (userId: string) => {
+    navigateTo(View.PublicProfile, userId);
   };
 
-  const handleRegister = (userData: Omit<User, 'id' | 'hashedPassword' | 'isAdmin'> & { password: string }) => {
+  const handleRegister = (userData: Omit<User, 'id' | 'hashedPassword' | 'isAdmin' | 'photo' | 'address' | 'favoriteMusic' | 'favoriteBook' | 'favoriteMovie' | 'hobbies' | 'favoriteFood' | 'dislikedThing' | 'introSentence'> & { password: string }) => {
     if (users.find(u => u.username.toLowerCase() === userData.username.toLowerCase())) {
       alert('ชื่อผู้ใช้นี้ถูกใช้ไปแล้ว โปรดเลือกชื่ออื่น');
       return false;
@@ -261,13 +253,12 @@ const App: React.FC = () => {
         return false;
     }
 
-
     const newUser: User = {
       id: Date.now().toString(),
       displayName: userData.displayName,
       username: userData.username,
       email: userData.email,
-      hashedPassword: userData.password,
+      hashedPassword: userData.password, // In a real app, hash this
       isAdmin: (userData.username.toLowerCase() === ADMIN_USERNAME || userData.email.toLowerCase() === ADMIN_EMAIL) && userData.password === ADMIN_PASSWORD,
       mobile: userData.mobile,
       lineId: userData.lineId || undefined,
@@ -275,6 +266,15 @@ const App: React.FC = () => {
       gender: userData.gender,
       birthdate: userData.birthdate,
       educationLevel: userData.educationLevel,
+      photo: undefined, 
+      address: undefined, 
+      favoriteMusic: undefined,
+      favoriteBook: undefined,
+      favoriteMovie: undefined,
+      hobbies: undefined,
+      favoriteFood: undefined,
+      dislikedThing: undefined,
+      introSentence: undefined,
     };
     setUsers(prev => [...prev, newUser]);
     setCurrentUser(newUser);
@@ -286,7 +286,7 @@ const App: React.FC = () => {
   const handleLogin = (loginIdentifier: string, passwordAttempt: string) => {
     const userFromList = users.find(
       u => (u.username.toLowerCase() === loginIdentifier.toLowerCase() || u.email.toLowerCase() === loginIdentifier.toLowerCase()) &&
-           u.hashedPassword === passwordAttempt
+           u.hashedPassword === passwordAttempt // In real app, compare hashed passwords
     );
     if (userFromList) {
       const isAdminLogin = (userFromList.username.toLowerCase() === ADMIN_USERNAME || userFromList.email.toLowerCase() === ADMIN_EMAIL) && userFromList.hashedPassword === ADMIN_PASSWORD;
@@ -300,7 +300,9 @@ const App: React.FC = () => {
     }
   };
 
-  const handleUpdateUserProfile = (updatedProfileData: Pick<User, 'mobile' | 'lineId' | 'facebook' | 'gender' | 'birthdate' | 'educationLevel'>) => {
+  const handleUpdateUserProfile = (
+    updatedProfileData: Pick<User, 'mobile' | 'lineId' | 'facebook' | 'gender' | 'birthdate' | 'educationLevel' | 'photo' | 'address' | 'favoriteMusic' | 'favoriteBook' | 'favoriteMovie' | 'hobbies' | 'favoriteFood' | 'dislikedThing' | 'introSentence'>
+  ) => {
     if (!currentUser) {
       alert('เกิดข้อผิดพลาด: ไม่พบข้อมูลผู้ใช้ปัจจุบัน');
       return false;
@@ -330,6 +332,15 @@ const App: React.FC = () => {
       gender: updatedProfileData.gender,
       birthdate: updatedProfileData.birthdate,
       educationLevel: updatedProfileData.educationLevel,
+      photo: updatedProfileData.photo,
+      address: updatedProfileData.address || undefined,
+      favoriteMusic: updatedProfileData.favoriteMusic || undefined,
+      favoriteBook: updatedProfileData.favoriteBook || undefined,
+      favoriteMovie: updatedProfileData.favoriteMovie || undefined,
+      hobbies: updatedProfileData.hobbies || undefined,
+      favoriteFood: updatedProfileData.favoriteFood || undefined,
+      dislikedThing: updatedProfileData.dislikedThing || undefined,
+      introSentence: updatedProfileData.introSentence || undefined,
     };
 
     setUsers(prevUsers => prevUsers.map(u => u.id === currentUser.id ? updatedUser : u));
@@ -343,6 +354,7 @@ const App: React.FC = () => {
     setItemToEdit(null);
     setEditingItemType(null);
     setSourceViewForForm(null);
+    setViewingProfileId(null);
     alert('ออกจากระบบเรียบร้อยแล้ว');
     navigateTo(View.Home);
   };
@@ -485,7 +497,7 @@ const App: React.FC = () => {
     navigateTo(sourceViewForForm === View.MyPosts ? View.MyPosts : View.FindJobs);
     setSourceViewForForm(null);
     alert('ประกาศงานของคุณถูกเพิ่มเรียบร้อยแล้ว!');
-  }, [currentUser, sourceViewForForm, navigateTo, headerVisible]); 
+  }, [currentUser, sourceViewForForm, navigateTo]); 
 
   const handleAddHelperProfile = useCallback((newProfileData: HelperProfileFormData) => {
     if (!currentUser) {
@@ -519,7 +531,7 @@ const App: React.FC = () => {
     navigateTo(sourceViewForForm === View.MyPosts ? View.MyPosts : View.FindHelpers);
     setSourceViewForForm(null);
     alert('โปรไฟล์ของคุณถูกเพิ่มเรียบร้อยแล้ว!');
-  }, [currentUser, sourceViewForForm, navigateTo, headerVisible]); 
+  }, [currentUser, sourceViewForForm, navigateTo]); 
 
 
   const openConfirmModal = (title: string, message: string, onConfirm: () => void) => {
@@ -661,11 +673,7 @@ const App: React.FC = () => {
 
   const renderHeader = () => (
     <header
-      ref={headerRef}
-      className={`bg-headerBlue-DEFAULT dark:bg-dark-headerBg text-neutral-dark dark:text-dark-text p-3 sm:p-6 shadow-md sticky top-0 z-40 transition-transform duration-300 ease-in-out ${
-        !headerVisible ? '-translate-y-full' : 'translate-y-0'
-      }`}
-      aria-hidden={!headerVisible}
+      className="sticky top-0 z-50 w-full bg-headerBlue-DEFAULT dark:bg-dark-headerBg text-neutral-dark dark:text-dark-text p-3 sm:p-6 shadow-md"
     >
       <div className="container mx-auto flex flex-col sm:flex-row justify-between items-center">
         <h1
@@ -748,15 +756,15 @@ const App: React.FC = () => {
         ✨ หาจ๊อบจ้า ✨
       </h2>
       <p className="text-lg text-neutral-dark dark:text-dark-textMuted mb-4 font-normal">
-        รวมงานพาร์ทไทม์ งานช่วยด่วน และคนว่างพร้อมรับงาน
+        จุดรวมงานจิปาถะ งานพาร์ทไทม์ งานโชว์ทักษะด้านอื่นในชีวิต
       </p>
       <p className="text-md sm:text-lg text-neutral-dark dark:text-dark-textMuted max-w-xl leading-relaxed mb-10 font-normal">
-        โพสต์งานด่วนหรือฝากโปรไฟล์คนว่าง ให้คนในเชียงใหม่หากันเจอแบบง่าย ๆ <br className="hidden sm:inline" />ไม่ต้องไถกลุ่มเฟซทุกวัน!
+        คนเราทุกคนอาจมีทักษะนอกเหนือจากงานหลักและเวลาเหลือ ลองงัดมาใช้หาเงินดู!
       </p>
 
       <div className="w-full max-w-3xl grid grid-cols-1 md:grid-cols-2 gap-8">
         <div className="bg-white dark:bg-dark-cardBg p-6 rounded-xl shadow-lg border border-primary/30 dark:border-dark-primary-DEFAULT/30">
-          <h3 className="text-2xl font-semibold text-primary dark:text-dark-primary-DEFAULT mb-4">🔴 สำหรับคนหาคนทำงาน</h3>
+          <h3 className="text-2xl font-semibold text-primary dark:text-dark-primary-DEFAULT mb-4">หาคนทำงาน</h3>
           <div className="space-y-4">
             <Button
               onClick={() => {
@@ -783,7 +791,7 @@ const App: React.FC = () => {
         </div>
 
         <div className="bg-white dark:bg-dark-cardBg p-6 rounded-xl shadow-lg border border-secondary/30 dark:border-dark-secondary-DEFAULT/30">
-          <h3 className="text-2xl font-semibold text-secondary-hover dark:text-dark-secondary-hover mb-4">🟡 สำหรับคนหางาน</h3>
+          <h3 className="text-2xl font-semibold text-secondary-hover dark:text-dark-secondary-hover mb-4">คนอยากหางาน</h3>
           <div className="space-y-4">
             <Button
               onClick={() => {
@@ -869,21 +877,32 @@ const App: React.FC = () => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
           {jobs.sort((a, b) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0) || new Date(b.postedAt!).getTime() - new Date(a.postedAt!).getTime()).map(job => (
-            <JobCard key={job.id} job={job} />
+            <JobCard key={job.id} job={job} navigateTo={navigateTo} />
           ))}
         </div>
       )}
     </div>
   );
 
-  const renderFindHelpers = () => (
+  const renderFindHelpers = () => {
+    const enrichedHelperProfiles: EnrichedHelperProfile[] = helperProfiles.map(hp => {
+      const user = users.find(u => u.id === hp.userId);
+      return {
+        ...hp,
+        userPhoto: user?.photo,
+        userAddress: user?.address, // For card snippet, or PublicProfilePage can use user.address
+        userDisplayName: user?.displayName || user?.username || 'User',
+      };
+    }).sort((a, b) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0) || new Date(b.postedAt!).getTime() - new Date(a.postedAt!).getTime());
+
+    return (
     <div className="container mx-auto p-4 sm:p-8">
       <h2 className="text-3xl font-semibold text-secondary-hover dark:text-dark-secondary-hover mb-3 text-center">🧑‍🔧 คนขยันพร้อมช่วย อยู่ตรงนี้แล้ว</h2>
       <p className="text-md text-neutral-dark dark:text-dark-textMuted mb-8 text-center max-w-xl mx-auto font-normal">
         ลองดูโปรไฟล์ของผู้ที่พร้อมช่วยงานช่วงสั้น ๆ ในเชียงใหม่<br/>
         เลือกคนที่ตรงกับความต้องการ แล้วติดต่อได้เลย
       </p>
-      {helperProfiles.length === 0 ? (
+      {enrichedHelperProfiles.length === 0 ? (
          <div className="text-center py-10">
            <svg className="mx-auto h-24 w-24 text-neutral-DEFAULT dark:text-dark-border" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
             <path vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-2.144M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
@@ -897,13 +916,14 @@ const App: React.FC = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {helperProfiles.sort((a, b) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0) || new Date(b.postedAt!).getTime() - new Date(a.postedAt!).getTime()).map(profile => (
-            <HelperCard key={profile.id} profile={profile} />
+          {enrichedHelperProfiles.map(profile => (
+            <HelperCard key={profile.id} profile={profile} onNavigateToPublicProfile={handleNavigateToPublicProfile} navigateTo={navigateTo} />
           ))}
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   const renderRegister = () => (
     <RegistrationForm onRegister={handleRegister} onSwitchToLogin={() => navigateTo(View.Login)} />
@@ -969,6 +989,21 @@ const App: React.FC = () => {
   };
 
   const renderAboutUsPage = () => <AboutUsPage />;
+  const renderSafetyPage = () => <SafetyPage />; // New render function
+
+  const renderPublicProfile = () => {
+    if (!viewingProfileId) {
+      navigateTo(View.Home); // Should not happen if logic is correct
+      return <p className="text-center p-8">Loading profile...</p>;
+    }
+    const profileUser = users.find(u => u.id === viewingProfileId);
+    if (!profileUser) {
+      return <p className="text-center p-8 text-red-500">ไม่พบโปรไฟล์ผู้ใช้</p>;
+    }
+    const helperProfileForBio = helperProfiles.find(hp => hp.userId === viewingProfileId);
+    return <PublicProfilePage user={profileUser} helperProfileDetails={helperProfileForBio?.details} onBack={() => navigateTo(View.FindHelpers)} />;
+  };
+
 
   let currentViewContent;
   switch (currentView) {
@@ -1005,14 +1040,20 @@ const App: React.FC = () => {
     case View.AboutUs:
       currentViewContent = renderAboutUsPage();
       break;
+    case View.PublicProfile:
+      currentViewContent = renderPublicProfile();
+      break;
+    case View.Safety: // New Case for Safety Page
+      currentViewContent = renderSafetyPage();
+      break;
     default:
       currentViewContent = renderHome();
   }
 
   return (
-    <div className="min-h-screen bg-neutral-light dark:bg-dark-pageBg">
+    <div className="flex flex-col flex-1 bg-neutral-light dark:bg-dark-pageBg">
       {renderHeader()}
-      <main> 
+      <main className="flex-1 overflow-y-auto pt-20 sm:pt-24"> 
         {currentViewContent}
       </main>
       <ConfirmModal
@@ -1024,12 +1065,17 @@ const App: React.FC = () => {
       />
       <footer className="bg-headerBlue-DEFAULT dark:bg-dark-headerBg text-center text-neutral-dark dark:text-dark-text p-4 mt-auto font-normal">
         <div className="container mx-auto flex flex-col sm:flex-row justify-center items-center gap-x-6 gap-y-2">
-            {/* <p>หาจ๊อบจ้า</p> (Removed) */}
             <button
                 onClick={() => navigateTo(View.AboutUs)}
                 className="hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
             >
                 เกี่ยวกับเรา
+            </button>
+            <button
+                onClick={() => navigateTo(View.Safety)}
+                className="hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
+            >
+                🔒 โปรดอ่านเพื่อความปลอดภัย
             </button>
         </div>
       </footer>

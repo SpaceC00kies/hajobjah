@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import type { User } from '../types';
 import { GenderOption, HelperEducationLevelOption } from '../types';
@@ -7,11 +8,11 @@ import { isValidThaiMobileNumberUtil } from '../App';
 
 interface UserProfilePageProps {
   currentUser: User;
-  onUpdateProfile: (updatedData: Pick<User, 'mobile' | 'lineId' | 'facebook' | 'gender' | 'birthdate' | 'educationLevel'>) => boolean;
+  onUpdateProfile: (updatedData: Pick<User, 'mobile' | 'lineId' | 'facebook' | 'gender' | 'birthdate' | 'educationLevel' | 'photo' | 'address' | 'favoriteMusic' | 'favoriteBook' | 'favoriteMovie' | 'hobbies' | 'favoriteFood' | 'dislikedThing' | 'introSentence'>) => boolean;
   onCancel: () => void;
 }
 
-type UserProfileFormErrorKeys = 'mobile' | 'gender' | 'birthdate' | 'educationLevel' | 'general';
+type UserProfileFormErrorKeys = 'mobile' | 'gender' | 'birthdate' | 'educationLevel' | 'general' | 'photo';
 type FeedbackType = { type: 'success' | 'error'; message: string };
 
 const calculateAge = (birthdateString?: string): number | null => {
@@ -28,6 +29,16 @@ const calculateAge = (birthdateString?: string): number | null => {
   return age;
 };
 
+const FallbackAvatar: React.FC<{ name?: string, size?: string }> = ({ name, size = "w-32 h-32" }) => {
+  const initial = name ? name.charAt(0).toUpperCase() : '👤';
+  return (
+    <div className={`${size} rounded-full bg-neutral dark:bg-dark-inputBg flex items-center justify-center text-4xl text-white dark:text-dark-text shadow-md`}>
+      {initial}
+    </div>
+  );
+};
+
+
 export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, onUpdateProfile, onCancel }) => {
   const [mobile, setMobile] = useState(currentUser.mobile);
   const [lineId, setLineId] = useState(currentUser.lineId || '');
@@ -36,6 +47,17 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
   const [birthdate, setBirthdate] = useState(currentUser.birthdate || '');
   const [educationLevel, setEducationLevel] = useState(currentUser.educationLevel || HelperEducationLevelOption.NotStated);
   const [currentAge, setCurrentAge] = useState<number | null>(calculateAge(currentUser.birthdate));
+  const [address, setAddress] = useState(currentUser.address || '');
+  const [photoBase64, setPhotoBase64] = useState<string | undefined>(currentUser.photo);
+
+  // Personality states
+  const [favoriteMusic, setFavoriteMusic] = useState(currentUser.favoriteMusic || '');
+  const [favoriteBook, setFavoriteBook] = useState(currentUser.favoriteBook || '');
+  const [favoriteMovie, setFavoriteMovie] = useState(currentUser.favoriteMovie || '');
+  const [hobbies, setHobbies] = useState(currentUser.hobbies || '');
+  const [favoriteFood, setFavoriteFood] = useState(currentUser.favoriteFood || '');
+  const [dislikedThing, setDislikedThing] = useState(currentUser.dislikedThing || '');
+  const [introSentence, setIntroSentence] = useState(currentUser.introSentence || '');
   
   const [errors, setErrors] = useState<Partial<Record<UserProfileFormErrorKeys, string>>>({});
   const [feedback, setFeedback] = useState<FeedbackType | null>(null);
@@ -48,6 +70,16 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
     setBirthdate(currentUser.birthdate || '');
     setEducationLevel(currentUser.educationLevel || HelperEducationLevelOption.NotStated);
     setCurrentAge(calculateAge(currentUser.birthdate));
+    setAddress(currentUser.address || '');
+    setPhotoBase64(currentUser.photo);
+    // Update personality states
+    setFavoriteMusic(currentUser.favoriteMusic || '');
+    setFavoriteBook(currentUser.favoriteBook || '');
+    setFavoriteMovie(currentUser.favoriteMovie || '');
+    setHobbies(currentUser.hobbies || '');
+    setFavoriteFood(currentUser.favoriteFood || '');
+    setDislikedThing(currentUser.dislikedThing || '');
+    setIntroSentence(currentUser.introSentence || '');
   }, [currentUser]);
 
   const inputBaseStyle = "w-full p-3 bg-white dark:bg-dark-inputBg border border-[#CCCCCC] dark:border-dark-border rounded-[10px] text-neutral-dark dark:text-dark-text font-normal focus:outline-none";
@@ -55,13 +87,35 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
   const inputErrorStyle = "border-red-500 dark:border-red-400 focus:border-red-500 dark:focus:border-red-400 focus:ring-1 focus:ring-red-500/50 dark:focus:ring-red-400/50";
   const readOnlyStyle = "bg-neutral-light dark:bg-dark-inputBg/50 cursor-not-allowed";
   const selectBaseStyle = `${inputBaseStyle} appearance-none`;
+  const textareaBaseStyle = `${inputBaseStyle} min-h-[60px]`;
+
+
+  const handlePhotoChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) { // 2MB limit
+        setErrors(prev => ({ ...prev, photo: 'ขนาดรูปภาพต้องไม่เกิน 2MB' }));
+        event.target.value = ''; // Reset file input
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPhotoBase64(reader.result as string);
+        setErrors(prev => ({ ...prev, photo: undefined }));
+      };
+      reader.onerror = () => {
+        setErrors(prev => ({ ...prev, photo: 'ไม่สามารถอ่านไฟล์รูปภาพได้' }));
+      }
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleBirthdateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newBirthdate = e.target.value;
     setBirthdate(newBirthdate);
     const age = calculateAge(newBirthdate);
     setCurrentAge(age);
-    if (age !== null || newBirthdate === '') { // Clear error if valid or empty
+    if (age !== null || newBirthdate === '') { 
         setErrors(prev => ({ ...prev, birthdate: undefined }));
     }
   };
@@ -71,11 +125,10 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
     if (!mobile.trim()) newErrors.mobile = 'กรุณากรอกเบอร์โทรศัพท์';
     else if (!isValidThaiMobileNumberUtil(mobile)) newErrors.mobile = 'รูปแบบเบอร์โทรศัพท์ไม่ถูกต้อง (เช่น 08X-XXX-XXXX)';
     
-    if (!gender || gender === GenderOption.NotSpecified) newErrors.gender = 'กรุณาเลือกเพศ'; // Assuming NotSpecified is not a valid choice for profile update
+    if (!gender || gender === GenderOption.NotSpecified) newErrors.gender = 'กรุณาเลือกเพศ'; 
     if (!birthdate) newErrors.birthdate = 'กรุณาเลือกวันเกิด';
     else if (calculateAge(birthdate) === null) newErrors.birthdate = 'กรุณาเลือกวันเกิดที่ถูกต้อง (ต้องไม่ใช่วันในอนาคต)';
     if (!educationLevel || educationLevel === HelperEducationLevelOption.NotStated) newErrors.educationLevel = 'กรุณาเลือกระดับการศึกษา';
-
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -83,29 +136,46 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setErrors({});
+    setErrors(prev => ({...prev, general: undefined, photo: prev.photo && prev.photo.startsWith('ขนาดรูปภาพต้องไม่เกิน') ? prev.photo : undefined })); // Clear general error, keep photo size error if still relevant
     setFeedback(null); 
 
     if (!validateForm()) {
       setFeedback({ type: 'error', message: 'ข้อมูลไม่ถูกต้อง โปรดตรวจสอบข้อผิดพลาด' });
       return;
     }
+     if (errors.photo) { // If there's still a photo error (e.g. size)
+      setFeedback({ type: 'error', message: errors.photo });
+      return;
+    }
 
-    const success = onUpdateProfile({ mobile, lineId, facebook, gender, birthdate, educationLevel });
+    const success = onUpdateProfile({ 
+      mobile, lineId, facebook, gender, birthdate, educationLevel, photo: photoBase64, address,
+      favoriteMusic, favoriteBook, favoriteMovie, hobbies, favoriteFood, dislikedThing, introSentence
+    });
     if (success) {
       setFeedback({ type: 'success', message: 'อัปเดตโปรไฟล์เรียบร้อยแล้ว!' });
     } else {
-      // App.tsx might show specific alerts, this is a fallback
       setFeedback({ type: 'error', message: 'เกิดข้อผิดพลาดบางอย่าง ไม่สามารถบันทึกข้อมูลได้' });
     }
     setTimeout(() => {
         setFeedback(null);
     }, 4000);
   };
+  
+  const personalityFields = [
+    { name: 'favoriteMusic', label: '🎧 เพลงที่ชอบ', value: favoriteMusic, setter: setFavoriteMusic, placeholder: 'เช่น Pop, Rock, ลูกทุ่ง, Jazz', type: 'text' },
+    { name: 'favoriteBook', label: '📚 หนังสือที่ชอบ', value: favoriteBook, setter: setFavoriteBook, placeholder: 'เช่น นิยายสืบสวน, การ์ตูน, พัฒนาตัวเอง', type: 'text' },
+    { name: 'favoriteMovie', label: '🎬 หนังที่ชอบ', value: favoriteMovie, setter: setFavoriteMovie, placeholder: 'เช่น Action, Comedy, Sci-fi, Drama', type: 'text' },
+    { name: 'hobbies', label: '🧶 งานอดิเรก', value: hobbies, setter: setHobbies, placeholder: 'เช่น อ่านหนังสือ, เล่นเกม, วาดรูป, ทำอาหาร', type: 'textarea' },
+    { name: 'favoriteFood', label: '🍜 อาหารที่ชอบ', value: favoriteFood, setter: setFavoriteFood, placeholder: 'เช่น ส้มตำ, พิซซ่า, ซูชิ, ก๋วยเตี๋ยว', type: 'text' },
+    { name: 'dislikedThing', label: '🚫 สิ่งที่ไม่ชอบที่สุด', value: dislikedThing, setter: setDislikedThing, placeholder: 'เช่น ความไม่ซื่อสัตย์, แมลงสาบ', type: 'text' },
+    { name: 'introSentence', label: '💬 ประโยคที่อยากให้คนรู้จักเรา', value: introSentence, setter: setIntroSentence, placeholder: 'เช่น เป็นคนง่ายๆ สบายๆ ชอบเรียนรู้สิ่งใหม่', type: 'textarea' },
+  ];
+
 
   return (
-    <div className="bg-white dark:bg-dark-cardBg p-8 rounded-xl shadow-2xl w-full max-w-lg mx-auto my-10 border border-neutral-DEFAULT dark:border-dark-border">
-      <h2 className="text-3xl font-semibold text-secondary-hover dark:text-dark-secondary-hover mb-3 text-center">👤 โปรไฟล์ของฉัน</h2>
+    <div className="bg-white dark:bg-dark-cardBg p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-lg mx-auto my-10 border border-neutral-DEFAULT dark:border-dark-border">
+      <h2 className="text-3xl font-semibold text-secondary-hover dark:text-dark-secondary-hover mb-6 text-center">👤 โปรไฟล์ของฉัน</h2>
       
       {feedback && (
         <div 
@@ -119,6 +189,25 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
       )}
 
       <form onSubmit={handleSubmit} className="space-y-5">
+        <div className="flex flex-col items-center mb-6">
+          {photoBase64 ? (
+            <img src={photoBase64} alt="Profile Preview" className="w-32 h-32 rounded-full object-cover shadow-md mb-3" />
+          ) : (
+            <FallbackAvatar name={currentUser.displayName} size="w-32 h-32" />
+          )}
+          <label htmlFor="photoUpload" className="cursor-pointer text-sm text-secondary dark:text-dark-secondary-DEFAULT hover:underline">
+            เปลี่ยนรูปโปรไฟล์ (ไม่เกิน 2MB)
+          </label>
+          <input 
+            type="file" 
+            id="photoUpload" 
+            accept="image/*" 
+            onChange={handlePhotoChange} 
+            className="hidden" 
+          />
+          {errors.photo && <p className="text-red-500 dark:text-red-400 text-xs mt-1 text-center">{errors.photo}</p>}
+        </div>
+
         <div>
           <label htmlFor="profileDisplayName" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">ชื่อที่แสดง</label>
           <input 
@@ -193,6 +282,48 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
                 </select>
                  {errors.educationLevel && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.educationLevel}</p>}
             </div>
+        </div>
+
+        <div className="pt-4 border-t border-neutral-DEFAULT/50 dark:border-dark-border/30">
+          <label htmlFor="profileAddress" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">ที่อยู่ (ไม่บังคับ - จะแสดงในโปรไฟล์สาธารณะของคุณ)</label>
+          <textarea 
+            id="profileAddress" 
+            value={address} 
+            onChange={(e) => setAddress(e.target.value)}
+            rows={3}
+            className={`${textareaBaseStyle} ${inputFocusStyle}`} 
+            placeholder="เช่น บ้านเลขที่, ถนน, ตำบล, อำเภอ, จังหวัด, รหัสไปรษณีย์"
+          />
+        </div>
+
+        <div className="pt-4 border-t border-neutral-DEFAULT/50 dark:border-dark-border/30">
+          <h3 className="text-lg font-medium text-neutral-dark dark:text-dark-text mb-3">ข้อมูลบุคลิกภาพ (ไม่บังคับ - จะแสดงในโปรไฟล์สาธารณะของคุณ)</h3>
+          {personalityFields.map(field => (
+            <div key={field.name} className="mb-4">
+              <label htmlFor={`profile-${field.name}`} className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">
+                {field.label}
+              </label>
+              {field.type === 'textarea' ? (
+                <textarea
+                  id={`profile-${field.name}`}
+                  value={field.value}
+                  onChange={(e) => field.setter(e.target.value)}
+                  rows={field.name === 'introSentence' ? 3 : 2}
+                  className={`${textareaBaseStyle} ${inputFocusStyle}`}
+                  placeholder={field.placeholder}
+                />
+              ) : (
+                <input
+                  type="text"
+                  id={`profile-${field.name}`}
+                  value={field.value}
+                  onChange={(e) => field.setter(e.target.value)}
+                  className={`${inputBaseStyle} ${inputFocusStyle}`}
+                  placeholder={field.placeholder}
+                />
+              )}
+            </div>
+          ))}
         </div>
 
 

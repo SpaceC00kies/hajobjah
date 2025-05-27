@@ -1,12 +1,25 @@
+
+
 import React, { useState } from 'react';
-import type { HelperProfile } from '../types';
-import { GenderOption, HelperEducationLevelOption } from '../types'; // Import for comparison if needed
+import type { EnrichedHelperProfile } from '../types'; // Changed from HelperProfile
+import { GenderOption, HelperEducationLevelOption, View } from '../types'; // Import View
 import { Button } from './Button';
 import { Modal } from './Modal';
 
 interface HelperCardProps {
-  profile: HelperProfile;
+  profile: EnrichedHelperProfile; 
+  onNavigateToPublicProfile: (userId: string) => void; 
+  navigateTo: (view: View) => void; // Add navigateTo prop
 }
+
+const FallbackAvatarDisplay: React.FC<{ name?: string, size?: string }> = ({ name, size = "w-16 h-16" }) => {
+  const initial = name ? name.charAt(0).toUpperCase() : '👤';
+  return (
+    <div className={`${size} rounded-full bg-neutral dark:bg-dark-inputBg flex items-center justify-center text-2xl text-white dark:text-dark-text shadow`}>
+      {initial}
+    </div>
+  );
+};
 
 const calculateAge = (birthdateString?: string): number | null => {
   if (!birthdateString) return null;
@@ -40,7 +53,7 @@ const formatDateDisplay = (dateString?: string): string | null => {
   }
 };
 
-export const HelperCard: React.FC<HelperCardProps> = ({ profile }) => {
+export const HelperCard: React.FC<HelperCardProps> = ({ profile, onNavigateToPublicProfile, navigateTo }) => {
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [isWarningModalOpen, setIsWarningModalOpen] = useState(false);
 
@@ -82,6 +95,9 @@ export const HelperCard: React.FC<HelperCardProps> = ({ profile }) => {
   const useBoxStyleForContact = typeof contactText === 'string' && 
                                 (contactText.includes('เบอร์โทร:') || contactText.includes('LINE ID:') || contactText.includes('Facebook:'));
 
+  const shortAddress = profile.userAddress ? profile.userAddress.split(',')[0] : null;
+
+
   return (
     <>
       <div className="bg-white dark:bg-dark-cardBg shadow-lg rounded-xl p-6 mb-6 border border-neutral-DEFAULT dark:border-dark-border hover:shadow-xl transition-shadow duration-300 flex flex-col h-full">
@@ -106,7 +122,19 @@ export const HelperCard: React.FC<HelperCardProps> = ({ profile }) => {
             </p>
           </div>
         )}
-        <h3 className="text-2xl font-semibold text-secondary-hover dark:text-dark-secondary-hover mb-2">{profile.profileTitle}</h3>
+
+        <div className="flex items-start mb-3">
+          {profile.userPhoto ? (
+            <img src={profile.userPhoto} alt={profile.userDisplayName} className="w-16 h-16 rounded-full object-cover mr-4 shadow" />
+          ) : (
+            <FallbackAvatarDisplay name={profile.userDisplayName} />
+          )}
+          <div className="flex-1">
+            <h3 className="text-2xl font-semibold text-secondary-hover dark:text-dark-secondary-hover">{profile.profileTitle}</h3>
+            <p className="text-sm text-neutral-medium dark:text-dark-textMuted">โดย: @{profile.username}</p>
+          </div>
+        </div>
+        
         <div className="space-y-2 text-neutral-dark dark:text-dark-textMuted mb-4 flex-grow font-normal">
           {profile.gender && profile.gender !== GenderOption.NotSpecified && (
             <p><strong className="font-medium text-neutral-dark dark:text-dark-text">เพศ:</strong> {profile.gender}</p>
@@ -117,7 +145,7 @@ export const HelperCard: React.FC<HelperCardProps> = ({ profile }) => {
           {profile.educationLevel && profile.educationLevel !== HelperEducationLevelOption.NotStated && (
             <p><strong className="font-medium text-neutral-dark dark:text-dark-text">ระดับการศึกษา:</strong> {profile.educationLevel}</p>
           )}
-          <p><strong className="font-medium text-neutral-dark dark:text-dark-text">📍 พื้นที่สะดวก:</strong> {profile.area}</p>
+          <p><strong className="font-medium text-neutral-dark dark:text-dark-text">📍 พื้นที่สะดวก:</strong> {profile.area}{shortAddress && `, ${shortAddress}`}</p>
           
           {availabilityDateDisplay && (
              <p><strong className="font-medium text-neutral-dark dark:text-dark-text">🗓️ ช่วงวันที่สะดวก:</strong> {availabilityDateDisplay}</p>
@@ -144,13 +172,7 @@ export const HelperCard: React.FC<HelperCardProps> = ({ profile }) => {
             <strong className="font-medium text-neutral-dark dark:text-dark-text">📝 เกี่ยวกับฉัน:</strong>
             <div className="mt-1 text-sm bg-neutral-light dark:bg-dark-inputBg dark:text-dark-text p-3 rounded-md whitespace-pre-wrap h-24 overflow-y-auto font-normal border border-neutral-DEFAULT/50 dark:border-dark-border/50">{profile.details || 'ไม่มีรายละเอียดเพิ่มเติม'}</div>
           </div>
-
-          {profile.username && (
-             <p className="text-xs sm:text-sm text-neutral-medium dark:text-dark-textMuted mt-3">
-              📎 โพสต์โดย: @{profile.username}
-            </p>
-          )}
-
+          
           {formattedPostedAt && (
             <p className="text-xs sm:text-sm text-neutral-medium dark:text-dark-textMuted mt-1 pt-2 border-t border-neutral-DEFAULT/30 dark:border-dark-border/20">
               📅 โปรไฟล์โพสต์เมื่อ: {formattedPostedAt}
@@ -164,25 +186,46 @@ export const HelperCard: React.FC<HelperCardProps> = ({ profile }) => {
             </span>
           </div>
         )}
-        <Button 
-          onClick={handleContact} 
-          variant="secondary" 
-          size="md" 
-          className="w-full mt-auto"
-          disabled={profile.isUnavailable} 
-        >
-          {profile.isUnavailable ? '✅ ไม่ว่างแล้ว' : '📞 ติดต่อคนนี้'}
-        </Button>
+        <div className="mt-auto space-y-2">
+            <Button 
+            onClick={() => onNavigateToPublicProfile(profile.userId)} 
+            variant="outline"
+            colorScheme="secondary"
+            size="md" 
+            className="w-full"
+            >
+            👁️ ดูโปรไฟล์เต็ม
+            </Button>
+            <Button 
+            onClick={handleContact} 
+            variant="secondary" 
+            size="md" 
+            className="w-full"
+            disabled={profile.isUnavailable} 
+            >
+            {profile.isUnavailable ? '✅ ไม่ว่างแล้ว' : '📞 ติดต่อคนนี้'}
+            </Button>
+        </div>
       </div>
       
       <Modal isOpen={isWarningModalOpen} onClose={closeWarningModal} title="⚠️ โปรดระวังมิจฉาชีพ">
         <div className="bg-accent/10 dark:bg-dark-accent-DEFAULT/10 border border-accent/30 dark:border-dark-accent-DEFAULT/30 p-4 rounded-md my-2 text-neutral-dark dark:text-dark-textMuted">
-          <p className="mb-2">หาจ๊อบจ้าเป็นเพียงสื่อกลางในการเชื่อมต่อผู้ว่าจ้างและผู้สมัคร</p>
-          <p className="mb-2 font-semibold text-red-600 dark:text-red-400">โปรดอย่าโอนเงินล่วงหน้าโดยเด็ดขาด</p>
-          <p>หากเกิดความเสียหาย ทางเว็บจะไม่รับผิดชอบใด ๆ ทั้งสิ้น</p>
+          <p className="mb-2">⚠️ โปรดใช้ความระมัดระวัง <strong className="text-red-600 dark:text-red-400">ห้ามโอนเงินก่อนเริ่มงาน</strong> และควรนัดเจอในที่ปลอดภัย</p>
+          <p>
+            หาจ๊อบจ้าเป็นเพียงพื้นที่ให้คนเจอกัน โปรดใช้วิจารณญาณในการติดต่อ ฉบับเต็มโปรดอ่านที่หน้า {" "}
+            <button
+              onClick={() => {
+                closeWarningModal();
+                navigateTo(View.Safety);
+              }}
+              className="text-accent dark:text-dark-accent-DEFAULT hover:underline font-semibold"
+            >
+              "โปรดอ่านเพื่อความปลอดภัย"
+            </button>
+          </p>
         </div>
         <Button onClick={handleProceedToContact} variant="accent" className="w-full mt-4">
-          เข้าใจแล้ว
+          เข้าใจแล้ว ดำเนินการต่อ
         </Button>
       </Modal>
 

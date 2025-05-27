@@ -2,17 +2,18 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import type { Job, AIPromptDetails } from '../types'; 
 import { JobDesiredEducationLevelOption } from '../types';
-import { generateJobDescription } from '../services/geminiService';
+import { generateJobDescription } from '../services/geminiService'; // Gemini service remains
 import { Button } from './Button';
 import { Modal } from './Modal';
 
-// This type represents the fields managed by the form, EXCLUDING admin-set fields, 'id', and 'contact'
-type FormDataType = Omit<Job, 'id' | 'postedAt' | 'userId' | 'username' | 'isSuspicious' | 'isPinned' | 'isHired' | 'contact'>;
+// FormDataType for fields managed by this form.
+// Excludes: id, postedAt, userId, username, contact (derived), admin fields
+type FormDataType = Omit<Job, 'id' | 'postedAt' | 'userId' | 'username' | 'contact' | 'isSuspicious' | 'isPinned' | 'isHired'>;
 
 interface PostJobFormProps {
-  onSubmitJob: (jobData: FormDataType & { id?: string }) => void; 
+  onSubmitJob: (jobData: FormDataType & { id?: string }) => Promise<void>; 
   onCancel: () => void;
-  initialData?: Job; // Full Job type for initial data, as contact is part of it (though not editable here)
+  initialData?: Job; 
   isEditing?: boolean;
 }
 
@@ -21,7 +22,6 @@ const initialFormStateForCreate: FormDataType = {
   location: '',
   dateTime: '', 
   payment: '',
-  // contact: '', // Removed from form state
   description: '',
   desiredAgeStart: undefined,
   desiredAgeEnd: undefined,
@@ -35,7 +35,6 @@ const initialFormStateForCreate: FormDataType = {
 
 type FormErrorsType = Partial<Record<keyof FormDataType, string>>;
 
-
 export const PostJobForm: React.FC<PostJobFormProps> = ({ onSubmitJob, onCancel, initialData, isEditing }) => {
   const [formData, setFormData] = useState<FormDataType>(initialFormStateForCreate);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -43,12 +42,13 @@ export const PostJobForm: React.FC<PostJobFormProps> = ({ onSubmitJob, onCancel,
     taskType: '', locationDetails: '', schedule: '', compensationDetails: '',
   });
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [formErrors, setFormErrors] = useState<FormErrorsType>({});
 
   useEffect(() => {
     if (isEditing && initialData) {
       const { 
-        id, postedAt, userId, username, isSuspicious, isPinned, isHired, contact, // Destructure contact but don't set it in form
+        id, postedAt, userId, username, contact, isSuspicious, isPinned, isHired,
         ...editableFields 
       } = initialData;
       setFormData(editableFields as FormDataType); 
@@ -71,12 +71,7 @@ export const PostJobForm: React.FC<PostJobFormProps> = ({ onSubmitJob, onCancel,
           const parsedInt = parseInt(value, 10);
           processedValue = isNaN(parsedInt) ? undefined : parsedInt;
         }
-
-        if (currentKey === 'desiredAgeStart') {
-          return { ...prev, desiredAgeStart: processedValue };
-        } else { 
-          return { ...prev, desiredAgeEnd: processedValue };
-        }
+        return { ...prev, [currentKey]: processedValue };
       } else if (currentKey === 'desiredEducationLevel') {
         return { ...prev, [currentKey]: value as JobDesiredEducationLevelOption || undefined };
       } else if (currentKey === 'preferredGender') {
@@ -110,11 +105,16 @@ export const PostJobForm: React.FC<PostJobFormProps> = ({ onSubmitJob, onCancel,
     if (!formData.title.trim()) errors.title = 'กรุณากรอกชื่องาน';
     if (!formData.location.trim()) errors.location = 'กรุณากรอกสถานที่';
     if (!formData.payment.trim()) errors.payment = 'กรุณากรอกค่าจ้าง';
-    // if (!formData.contact.trim()) errors.contact = 'กรุณากรอกวิธีติดต่อ'; // Removed validation for contact
     if (!formData.description.trim()) errors.description = 'กรุณากรอกรายละเอียดงาน';
 
     if (formData.desiredAgeStart && formData.desiredAgeEnd && formData.desiredAgeStart > formData.desiredAgeEnd) {
       errors.desiredAgeEnd = 'อายุสิ้นสุดต้องไม่น้อยกว่าอายุเริ่มต้น';
+    }
+     if (formData.desiredAgeStart && (formData.desiredAgeStart < 15 || formData.desiredAgeStart > 80)) {
+      errors.desiredAgeStart = 'อายุเริ่มต้นควรอยู่ระหว่าง 15 ถึง 80 ปี';
+    }
+    if (formData.desiredAgeEnd && (formData.desiredAgeEnd < 15 || formData.desiredAgeEnd > 80)) {
+      errors.desiredAgeEnd = 'อายุสิ้นสุดควรอยู่ระหว่าง 15 ถึง 80 ปี';
     }
     if (formData.dateNeededFrom && formData.dateNeededTo && formData.dateNeededTo < formData.dateNeededFrom) {
       errors.dateNeededTo = 'วันที่สิ้นสุดต้องไม่น้อยกว่าวันที่เริ่มต้น';
@@ -127,15 +127,18 @@ export const PostJobForm: React.FC<PostJobFormProps> = ({ onSubmitJob, onCancel,
     return Object.keys(errors).length === 0;
   };
   
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateForm()) return;
     
+    setIsSubmitting(true);
     const dataToSubmit: FormDataType & { id?: string } = { ...formData }; 
     if (isEditing && initialData) {
       dataToSubmit.id = initialData.id;
     }
-    onSubmitJob(dataToSubmit);
+    await onSubmitJob(dataToSubmit);
+    setIsSubmitting(false);
+
     if (!isEditing) { 
         setFormData(initialFormStateForCreate); 
     }
@@ -172,7 +175,6 @@ export const PostJobForm: React.FC<PostJobFormProps> = ({ onSubmitJob, onCancel,
     { name: 'location', label: 'สถานที่', placeholder: 'เช่น ร้านกาแฟ Cafe Amazon สาขานิมมาน', required: true },
     { name: 'dateTime', label: 'วันที่และเวลา (แบบข้อความ ถ้ามี)', placeholder: 'เช่น 15 ส.ค. 67 (10:00-18:00) หรือ "เสาร์-อาทิตย์นี้"', required: false },
     { name: 'payment', label: 'ค่าจ้าง', placeholder: 'เช่น 400 บาท/วัน, 60 บาท/ชั่วโมง', required: true },
-    // { name: 'contact', label: 'วิธีติดต่อ (LINE / เบอร์โทร)', placeholder: 'เช่น LINE ID: jobseekercnx, โทร: 081-2345678' }, // Removed contact field
   ] as const; 
 
   const aiPromptFields = [
@@ -186,10 +188,9 @@ export const PostJobForm: React.FC<PostJobFormProps> = ({ onSubmitJob, onCancel,
   const inputFocusStyle = "focus:border-primary dark:focus:border-dark-primary-DEFAULT focus:ring-1 focus:ring-primary/50 dark:focus:ring-dark-primary-DEFAULT/50";
   const inputErrorStyle = "border-red-500 dark:border-red-400 focus:border-red-500 dark:focus:border-red-400 focus:ring-1 focus:ring-red-500/50 dark:focus:ring-red-400/50";
   const selectBaseStyle = `${inputBaseStyle} appearance-none`;
-
   const modalInputBaseStyle = "w-full p-2 bg-white dark:bg-dark-inputBg border border-[#CCCCCC] dark:border-dark-border rounded-[10px] text-neutral-dark dark:text-dark-text font-normal focus:outline-none";
+  const ageOptions = ['', ...Array.from({ length: (80 - 15) + 1 }, (_, i) => 15 + i)];
 
-  const ageOptions = ['', ...Array.from({ length: (65 - 18) + 1 }, (_, i) => 18 + i)];
 
   return (
     <div className="bg-white dark:bg-dark-cardBg p-8 rounded-xl shadow-2xl w-full max-w-2xl mx-auto my-8 border border-neutral-DEFAULT dark:border-dark-border">
@@ -206,12 +207,9 @@ export const PostJobForm: React.FC<PostJobFormProps> = ({ onSubmitJob, onCancel,
               {field.label} {field.required && <span className="text-red-500 dark:text-red-400">*</span>}
             </label>
             <input
-              type="text"
-              id={field.name}
-              name={field.name}
+              type="text" id={field.name} name={field.name}
               value={formData[field.name as keyof typeof formData] ?? ''} 
-              onChange={handleChange}
-              placeholder={field.placeholder}
+              onChange={handleChange} placeholder={field.placeholder} disabled={isSubmitting}
               className={`${inputBaseStyle} ${formErrors[field.name as keyof FormErrorsType] ? inputErrorStyle : inputFocusStyle}`}
             />
             {formErrors[field.name as keyof FormErrorsType] && <p className="text-red-500 dark:text-red-400 text-xs mt-1 font-normal">{formErrors[field.name as keyof FormErrorsType]}</p>}
@@ -224,17 +222,14 @@ export const PostJobForm: React.FC<PostJobFormProps> = ({ onSubmitJob, onCancel,
               รายละเอียดงาน <span className="text-red-500 dark:text-red-400">*</span>
             </label>
             {!isEditing && ( 
-              <Button type="button" onClick={handleOpenModal} variant="accent" size="sm">
+              <Button type="button" onClick={handleOpenModal} variant="accent" size="sm" disabled={isSubmitting}>
                 🪄 ให้ AI ช่วยเขียน
               </Button>
             )}
           </div>
           <textarea
-            id="description"
-            name="description"
-            value={formData.description}
-            onChange={handleChange}
-            rows={5}
+            id="description" name="description" value={formData.description}
+            onChange={handleChange} rows={5} disabled={isSubmitting}
             placeholder="อธิบายลักษณะงาน, คุณสมบัติที่ต้องการ, หรือข้อมูลอื่นๆ ที่สำคัญ..."
             className={`${inputBaseStyle} ${formErrors.description ? inputErrorStyle : inputFocusStyle}`}
           />
@@ -243,67 +238,52 @@ export const PostJobForm: React.FC<PostJobFormProps> = ({ onSubmitJob, onCancel,
 
         <div className="pt-6 border-t border-neutral-DEFAULT dark:border-dark-border/50">
             <h3 className="text-xl font-semibold text-neutral-dark dark:text-dark-text mb-4">ข้อมูลผู้ช่วยที่ต้องการ (ถ้ามี)</h3>
-            
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-4">
               <div>
                 <label htmlFor="dateNeededFrom" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">วันที่ต้องการ: ตั้งแต่</label>
-                <input type="date" id="dateNeededFrom" name="dateNeededFrom" value={formData.dateNeededFrom || ''} onChange={handleChange} className={`${inputBaseStyle} ${formErrors.dateNeededFrom ? inputErrorStyle : inputFocusStyle}`} />
+                <input type="date" id="dateNeededFrom" name="dateNeededFrom" value={formData.dateNeededFrom || ''} onChange={handleChange} disabled={isSubmitting}
+                       className={`${inputBaseStyle} ${formErrors.dateNeededFrom ? inputErrorStyle : inputFocusStyle}`} />
                 {formErrors.dateNeededFrom && <p className="text-red-500 dark:text-red-400 text-xs mt-1 font-normal">{formErrors.dateNeededFrom}</p>}
               </div>
               <div>
                 <label htmlFor="dateNeededTo" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">ถึง (ถ้ามี)</label>
-                <input type="date" id="dateNeededTo" name="dateNeededTo" value={formData.dateNeededTo || ''} onChange={handleChange} className={`${inputBaseStyle} ${formErrors.dateNeededTo ? inputErrorStyle : inputFocusStyle}`} min={formData.dateNeededFrom}/>
+                <input type="date" id="dateNeededTo" name="dateNeededTo" value={formData.dateNeededTo || ''} onChange={handleChange} disabled={isSubmitting}
+                       className={`${inputBaseStyle} ${formErrors.dateNeededTo ? inputErrorStyle : inputFocusStyle}`} min={formData.dateNeededFrom}/>
                 {formErrors.dateNeededTo && <p className="text-red-500 dark:text-red-400 text-xs mt-1 font-normal">{formErrors.dateNeededTo}</p>}
               </div>
             </div>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-4">
               <div>
                 <label htmlFor="timeNeededStart" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">เวลาที่ต้องการ: เริ่ม</label>
-                <input type="time" id="timeNeededStart" name="timeNeededStart" value={formData.timeNeededStart || ''} onChange={handleChange} className={`${inputBaseStyle} ${formErrors.timeNeededStart ? inputErrorStyle : inputFocusStyle}`} />
+                <input type="time" id="timeNeededStart" name="timeNeededStart" value={formData.timeNeededStart || ''} onChange={handleChange} disabled={isSubmitting}
+                       className={`${inputBaseStyle} ${formErrors.timeNeededStart ? inputErrorStyle : inputFocusStyle}`} />
                 {formErrors.timeNeededStart && <p className="text-red-500 dark:text-red-400 text-xs mt-1 font-normal">{formErrors.timeNeededStart}</p>}
               </div>
               <div>
                 <label htmlFor="timeNeededEnd" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">สิ้นสุด</label>
-                <input type="time" id="timeNeededEnd" name="timeNeededEnd" value={formData.timeNeededEnd || ''} onChange={handleChange} className={`${inputBaseStyle} ${formErrors.timeNeededEnd ? inputErrorStyle : inputFocusStyle}`} />
+                <input type="time" id="timeNeededEnd" name="timeNeededEnd" value={formData.timeNeededEnd || ''} onChange={handleChange} disabled={isSubmitting}
+                       className={`${inputBaseStyle} ${formErrors.timeNeededEnd ? inputErrorStyle : inputFocusStyle}`} />
                 {formErrors.timeNeededEnd && <p className="text-red-500 dark:text-red-400 text-xs mt-1 font-normal">{formErrors.timeNeededEnd}</p>}
               </div>
             </div>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-4">
                 <div>
-                    <label htmlFor="desiredAgeStart" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">
-                        ช่วงอายุ: ตั้งแต่
-                    </label>
-                    <select
-                        id="desiredAgeStart"
-                        name="desiredAgeStart"
-                        value={formData.desiredAgeStart === undefined ? '' : String(formData.desiredAgeStart)}
-                        onChange={handleChange}
-                        className={`${selectBaseStyle} ${formErrors.desiredAgeStart ? inputErrorStyle : inputFocusStyle}`}
-                    >
-                        {ageOptions.map(age => (
-                            <option key={`start-${age}`} value={age}>{age === '' ? 'ไม่ระบุ' : `${age} ปี`}</option>
-                        ))}
+                    <label htmlFor="desiredAgeStart" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">ช่วงอายุ: ตั้งแต่</label>
+                    <select id="desiredAgeStart" name="desiredAgeStart" disabled={isSubmitting}
+                        value={formData.desiredAgeStart === undefined ? '' : String(formData.desiredAgeStart)} onChange={handleChange}
+                        className={`${selectBaseStyle} ${formErrors.desiredAgeStart ? inputErrorStyle : inputFocusStyle}`}>
+                        {ageOptions.map(age => (<option key={`start-${age}`} value={age}>{age === '' ? 'ไม่ระบุ' : `${age} ปี`}</option>))}
                     </select>
+                    {formErrors.desiredAgeStart && <p className="text-red-500 dark:text-red-400 text-xs mt-1 font-normal">{formErrors.desiredAgeStart}</p>}
                 </div>
                 <div>
-                    <label htmlFor="desiredAgeEnd" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">
-                        ถึง
-                    </label>
-                    <select
-                        id="desiredAgeEnd"
-                        name="desiredAgeEnd"
-                        value={formData.desiredAgeEnd === undefined ? '' : String(formData.desiredAgeEnd)}
-                        onChange={handleChange}
-                        className={`${selectBaseStyle} ${formErrors.desiredAgeEnd ? inputErrorStyle : inputFocusStyle}`}
-                    >
+                    <label htmlFor="desiredAgeEnd" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">ถึง</label>
+                    <select id="desiredAgeEnd" name="desiredAgeEnd" disabled={isSubmitting}
+                        value={formData.desiredAgeEnd === undefined ? '' : String(formData.desiredAgeEnd)} onChange={handleChange}
+                        className={`${selectBaseStyle} ${formErrors.desiredAgeEnd ? inputErrorStyle : inputFocusStyle}`}>
                          {ageOptions.map(age => (
-                            <option 
-                                key={`end-${age}`} 
-                                value={age} 
-                                disabled={formData.desiredAgeStart !== undefined && age !== '' && typeof age === 'number' ? age < formData.desiredAgeStart : false}
-                            >
+                            <option key={`end-${age}`} value={age} 
+                                disabled={formData.desiredAgeStart !== undefined && age !== '' && typeof age === 'number' ? age < formData.desiredAgeStart : false}>
                                 {age === '' ? 'ไม่ระบุ' : `${age} ปี`}
                             </option>
                         ))}
@@ -311,39 +291,24 @@ export const PostJobForm: React.FC<PostJobFormProps> = ({ onSubmitJob, onCancel,
                      {formErrors.desiredAgeEnd && <p className="text-red-500 dark:text-red-400 text-xs mt-1 font-normal">{formErrors.desiredAgeEnd}</p>}
                 </div>
             </div>
-            
             <div className="mb-4">
-                <label className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-2">
-                    เพศที่ต้องการ
-                </label>
+                <label className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-2">เพศที่ต้องการ</label>
                 <div className="flex flex-wrap gap-x-6 gap-y-2">
                     {(['ชาย', 'หญิง', 'ไม่จำกัด'] as const).map(gender => (
                         <label key={gender} className="flex items-center space-x-2 cursor-pointer">
-                            <input
-                                type="radio"
-                                name="preferredGender"
-                                value={gender}
-                                checked={formData.preferredGender === gender}
-                                onChange={handleRadioChange}
-                                className="form-radio h-4 w-4 text-primary dark:text-dark-primary-DEFAULT border-[#CCCCCC] dark:border-dark-border focus:ring-primary dark:focus:ring-dark-primary-DEFAULT"
-                            />
+                            <input type="radio" name="preferredGender" value={gender} checked={formData.preferredGender === gender}
+                                onChange={handleRadioChange} disabled={isSubmitting}
+                                className="form-radio h-4 w-4 text-primary dark:text-dark-primary-DEFAULT border-[#CCCCCC] dark:border-dark-border focus:ring-primary dark:focus:ring-dark-primary-DEFAULT"/>
                             <span className="text-neutral-dark dark:text-dark-text font-normal">{gender}</span>
                         </label>
                     ))}
                 </div>
             </div>
-
             <div>
-              <label htmlFor="desiredEducationLevel" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">
-                ระดับการศึกษาที่ต้องการ
-              </label>
-              <select
-                id="desiredEducationLevel"
-                name="desiredEducationLevel"
-                value={formData.desiredEducationLevel || ''}
-                onChange={handleChange}
-                className={`${selectBaseStyle} ${formErrors.desiredEducationLevel ? inputErrorStyle : inputFocusStyle}`}
-              >
+              <label htmlFor="desiredEducationLevel" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">ระดับการศึกษาที่ต้องการ</label>
+              <select id="desiredEducationLevel" name="desiredEducationLevel" value={formData.desiredEducationLevel || ''}
+                onChange={handleChange} disabled={isSubmitting}
+                className={`${selectBaseStyle} ${formErrors.desiredEducationLevel ? inputErrorStyle : inputFocusStyle}`}>
                 <option value="">-- ไม่จำกัด --</option>
                 {Object.values(JobDesiredEducationLevelOption).filter(level => level !== JobDesiredEducationLevelOption.Any).map(level => (
                   <option key={level} value={level}>{level}</option>
@@ -354,10 +319,10 @@ export const PostJobForm: React.FC<PostJobFormProps> = ({ onSubmitJob, onCancel,
         </div>
 
         <div className="flex flex-col sm:flex-row gap-4 pt-6">
-          <Button type="submit" variant="primary" size="lg" className="w-full sm:w-auto flex-grow">
-            {isEditing ? '💾 บันทึกการแก้ไข' : 'ลงประกาศงาน'}
+          <Button type="submit" variant="primary" size="lg" className="w-full sm:w-auto flex-grow" disabled={isSubmitting || isGenerating}>
+            {isSubmitting ? (isEditing ? 'กำลังบันทึก...' : 'กำลังลงประกาศ...') : (isEditing ? '💾 บันทึกการแก้ไข' : 'ลงประกาศงาน')}
           </Button>
-          <Button type="button" onClick={onCancel} variant="outline" colorScheme="primary" size="lg" className="w-full sm:w-auto flex-grow">
+          <Button type="button" onClick={onCancel} variant="outline" colorScheme="primary" size="lg" className="w-full sm:w-auto flex-grow" disabled={isSubmitting}>
             ยกเลิก
           </Button>
         </div>
@@ -369,18 +334,10 @@ export const PostJobForm: React.FC<PostJobFormProps> = ({ onSubmitJob, onCancel,
             <p className="text-sm text-neutral-dark dark:text-dark-textMuted">กรอกข้อมูลคร่าวๆ เพื่อให้ AI ช่วยร่างรายละเอียดงานให้คุณ (ภาษาไทย สุภาพ เรียบง่าย)</p>
             {aiPromptFields.map(field => (
                 <div key={field.name}>
-                <label htmlFor={`ai-${field.name}`} className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">
-                {field.label}
-                </label>
-                <input
-                type="text"
-                id={`ai-${field.name}`}
-                name={field.name}
-                value={aiPromptData[field.name as keyof AIPromptDetails]}
-                onChange={handleAiPromptChange}
-                placeholder={field.placeholder}
-                className={`${modalInputBaseStyle} ${inputFocusStyle}`} 
-                />
+                <label htmlFor={`ai-${field.name}`} className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">{field.label}</label>
+                <input type="text" id={`ai-${field.name}`} name={field.name} value={aiPromptData[field.name as keyof AIPromptDetails]}
+                       onChange={handleAiPromptChange} placeholder={field.placeholder}
+                       className={`${modalInputBaseStyle} ${inputFocusStyle}`} />
             </div>
             ))}
             <Button onClick={handleGenerateDescription} disabled={isGenerating} variant="secondary" className="w-full">

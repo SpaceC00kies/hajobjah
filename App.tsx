@@ -1,7 +1,38 @@
 
-import { auth, db, storage } from "./firebase";
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import type { Job, HelperProfile, User, EnrichedHelperProfile } from './types';
+// import firebase from 'firebase/compat/app'; // Removed unused V8 compat import
+import { auth, db, storage } from "../firebase"; // Existing Firebase setup
+import type { User as FirebaseUser } from 'firebase/auth'; // Firebase Auth User type
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+  updateProfile as updateAuthProfile
+} from 'firebase/auth';
+import {
+  collection,
+  addDoc,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  orderBy,
+  query,
+  setDoc,
+  updateDoc,
+  where,
+  Timestamp,
+  serverTimestamp,
+  increment,
+  arrayUnion,
+  arrayRemove,
+  writeBatch
+} from 'firebase/firestore';
+import { ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
+
+import type { Job, HelperProfile, User, EnrichedHelperProfile, Interaction } from './types';
 import type { AdminItem as AdminItemType } from './components/AdminDashboard';
 import { View, GenderOption, HelperEducationLevelOption } from './types';
 import { PostJobForm } from './components/PostJobForm';
@@ -18,12 +49,10 @@ import { UserProfilePage } from './components/UserProfilePage';
 import { AboutUsPage } from './components/AboutUsPage';
 import { PublicProfilePage } from './components/PublicProfilePage';
 import { SafetyPage } from './components/SafetyPage';
-import { FeedbackForm } from './components/FeedbackForm'; // New Import
+import { FeedbackForm } from './components/FeedbackForm';
 
 type Theme = 'light' | 'dark';
-const ADMIN_USERNAME = "admin";
-const ADMIN_EMAIL = "admin@hajobjah.com";
-const ADMIN_PASSWORD = "adminpass"; // DEMO ONLY - highly insecure
+const ADMIN_EMAIL_CONFIG = "admin@hajobjah.com"; // For identifying admin role
 
 export const isValidThaiMobileNumberUtil = (mobile: string): boolean => {
   if (!mobile) return false;
@@ -31,157 +60,50 @@ export const isValidThaiMobileNumberUtil = (mobile: string): boolean => {
   return /^0[689]\d{8}$/.test(cleaned);
 };
 
+export const checkProfileCompleteness = (user?: User | null): boolean => {
+  if (!user) return false;
+  const hasRequiredContact = !!user.mobile;
+  const hasPhoto = !!user.photoURL;
+  const hasAddress = !!user.address && user.address.trim() !== '';
+  const hasPersonalityInfo = !!(
+    user.favoriteMusic?.trim() ||
+    user.favoriteBook?.trim() ||
+    user.favoriteMovie?.trim() ||
+    user.hobbies?.trim() ||
+    user.favoriteFood?.trim() ||
+    user.dislikedThing?.trim() ||
+    user.introSentence?.trim()
+  );
+  return hasRequiredContact && hasPhoto && hasAddress && hasPersonalityInfo;
+};
+
+export const checkHasBeenContacted = (userId: string, allInteractions: Interaction[]): boolean => {
+  if (!userId || !allInteractions) return false;
+  // Check if there's any interaction where this userId was the helper and the type was 'contact_helper'.
+  return allInteractions.some(interaction => interaction.helperUserId === userId && interaction.type === 'contact_helper');
+};
+
+
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>(View.Home);
   const [theme, setTheme] = useState<Theme>('light');
-  const [viewingProfileId, setViewingProfileId] = useState<string | null>(null); 
+  const [viewingProfileId, setViewingProfileId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [confirmModalMessage, setConfirmModalMessage] = useState('');
   const [confirmModalTitle, setConfirmModalTitle] = useState('');
   const [onConfirmAction, setOnConfirmAction] = useState<(() => void) | null>(null);
 
-  // Feedback Form State
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const [feedbackSubmissionStatus, setFeedbackSubmissionStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [feedbackSubmissionMessage, setFeedbackSubmissionMessage] = useState<string | null>(null);
 
-
-  const [users, setUsers] = useState<User[]>(() => {
-    const savedUsers = localStorage.getItem('chiangMaiQuickUsers');
-    const adminUser: User = {
-      id: 'admin-user-001',
-      displayName: 'Admin User',
-      username: ADMIN_USERNAME,
-      email: ADMIN_EMAIL,
-      hashedPassword: ADMIN_PASSWORD,
-      isAdmin: true,
-      mobile: '088-888-8888',
-      lineId: 'admin_line_id',
-      facebook: 'admin_facebook_profile',
-      gender: GenderOption.NotSpecified,
-      birthdate: '1990-01-01',
-      educationLevel: HelperEducationLevelOption.Bachelor,
-      photo: undefined,
-      address: undefined,
-      favoriteMusic: 'Classical',
-      hobbies: 'Reading, Coding',
-    };
-    const testUser: User = {
-      id: 'test-user-002',
-      displayName: 'Test User',
-      username: 'test',
-      email: 'test@user.com',
-      hashedPassword: 'testpass',
-      isAdmin: false,
-      mobile: '081-234-5678',
-      lineId: 'test_user_line',
-      facebook: 'test_user_facebook',
-      gender: GenderOption.Male,
-      birthdate: '1995-05-15',
-      educationLevel: HelperEducationLevelOption.HighSchool,
-      photo: undefined,
-      address: '123 Mymoo Road, Chiang Mai',
-      favoriteMovie: 'Inception',
-      introSentence: 'I am a friendly and hardworking individual.',
-    };
-
-    if (savedUsers) {
-      try {
-        const parsedUsers = JSON.parse(savedUsers) as User[];
-        if (Array.isArray(parsedUsers)) {
-           let adminExists = false;
-           let regularTestUserExists = false;
-           const updatedUsers = parsedUsers.map(u => {
-            const baseUser: User = {
-                ...u,
-                mobile: u.mobile || '',
-                lineId: u.lineId || undefined,
-                facebook: u.facebook || undefined,
-                gender: u.gender || GenderOption.NotSpecified,
-                birthdate: u.birthdate || undefined,
-                educationLevel: u.educationLevel || HelperEducationLevelOption.NotStated,
-                photo: u.photo || undefined,
-                address: u.address || undefined,
-                favoriteMusic: u.favoriteMusic || undefined,
-                favoriteBook: u.favoriteBook || undefined,
-                favoriteMovie: u.favoriteMovie || undefined,
-                hobbies: u.hobbies || undefined,
-                favoriteFood: u.favoriteFood || undefined,
-                dislikedThing: u.dislikedThing || undefined,
-                introSentence: u.introSentence || undefined,
-            };
-            if (u.username === ADMIN_USERNAME && u.email === ADMIN_EMAIL) {
-              adminExists = true;
-              return { ...baseUser, ...adminUser, photo: u.photo || adminUser.photo, address: u.address || adminUser.address, favoriteMusic: u.favoriteMusic || adminUser.favoriteMusic, hobbies: u.hobbies || adminUser.hobbies };
-            }
-            if (u.username === 'test' && u.email === 'test@user.com') {
-              regularTestUserExists = true;
-              return { ...baseUser, ...testUser, photo: u.photo || testUser.photo, address: u.address || testUser.address, favoriteMovie: u.favoriteMovie || testUser.favoriteMovie, introSentence: u.introSentence || testUser.introSentence };
-            }
-            return baseUser;
-          });
-
-          if (!adminExists) updatedUsers.unshift(adminUser);
-          if (!regularTestUserExists) {
-            const insertIndex = adminExists ? 1 : 0;
-            updatedUsers.splice(insertIndex, 0, testUser);
-          }
-          return updatedUsers;
-        }
-      } catch (e) {
-        console.error("Error parsing users from localStorage, re-initializing.", e);
-      }
-    }
-    return [adminUser, testUser];
-  });
-
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const savedUser = localStorage.getItem('chiangMaiQuickCurrentUser');
-    if (savedUser) {
-        try {
-            const parsedUser = JSON.parse(savedUser) as User;
-            const fullUserFromList = users.find(u => u.id === parsedUser.id);
-
-            if (fullUserFromList && fullUserFromList.hashedPassword === parsedUser.hashedPassword) {
-                const isAdminLogin = (fullUserFromList.username.toLowerCase() === ADMIN_USERNAME || fullUserFromList.email.toLowerCase() === ADMIN_EMAIL) && fullUserFromList.hashedPassword === ADMIN_PASSWORD;
-                return {
-                    ...fullUserFromList,
-                    isAdmin: isAdminLogin || fullUserFromList.isAdmin || false
-                };
-            }
-            return null;
-        } catch (e) {
-            console.error("Error parsing current user from localStorage", e);
-            return null;
-        }
-    }
-    return null;
-  });
-
-  const [jobs, setJobs] = useState<Job[]>(() => {
-    const savedJobs = localStorage.getItem('chiangMaiQuickJobs');
-    if (savedJobs) {
-        try {
-            return JSON.parse(savedJobs);
-        } catch (e) {
-            console.error("Error parsing jobs from localStorage", e);
-        }
-    }
-    return [];
-  });
-
-  const [helperProfiles, setHelperProfiles] = useState<HelperProfile[]>(() => {
-    const savedHelpers = localStorage.getItem('chiangMaiQuickHelpers');
-     if (savedHelpers) {
-        try {
-            return JSON.parse(savedHelpers);
-        } catch (e) {
-            console.error("Error parsing helper profiles from localStorage", e);
-        }
-    }
-    return [];
-  });
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [helperProfiles, setHelperProfiles] = useState<HelperProfile[]>([]);
+  const [interactions, setInteractions] = useState<Interaction[]>([]);
 
   const [itemToEdit, setItemToEdit] = useState<Job | HelperProfile | null>(null);
   const [editingItemType, setEditingItemType] = useState<'job' | 'profile' | null>(null);
@@ -200,38 +122,88 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    localStorage.setItem('chiangMaiQuickUsers', JSON.stringify(users));
-  }, [users]);
-
-  useEffect(() => {
-    if (currentUser) {
-      const liveUser = users.find(u => u.id === currentUser.id);
-      if (liveUser) {
-        localStorage.setItem('chiangMaiQuickCurrentUser', JSON.stringify(liveUser));
+    setIsLoading(true);
+    const authUnsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
+      if (firebaseUser) {
+        const userDocRef = doc(db, "users", firebaseUser.uid);
+        const userDocSnap = await getDoc(userDocRef);
+        if (userDocSnap.exists()) {
+          const userData = userDocSnap.data() as User;
+          const fullUser: User = {
+            ...userData,
+            id: firebaseUser.uid,
+            email: firebaseUser.email || userData.email, // Prefer auth email
+            displayName: firebaseUser.displayName || userData.displayName, // Prefer auth displayName
+            photoURL: firebaseUser.photoURL || userData.photoURL, // Prefer auth photoURL
+            isAdmin: userData.email === ADMIN_EMAIL_CONFIG || userData.isAdmin || false,
+            // Recalculate badges based on potentially other data sources (like interactions)
+            // profileComplete and hasBeenContacted will be updated by their respective effects
+          };
+          setCurrentUser(fullUser);
+        } else {
+          // This case implies an auth user exists but no Firestore record,
+          // which might happen if Firestore doc creation failed during registration.
+          // For now, treat as logged out, or prompt to complete profile.
+           console.warn("User authenticated but no Firestore record found. Logging out.");
+           await signOut(auth);
+           setCurrentUser(null);
+        }
       } else {
-        localStorage.removeItem('chiangMaiQuickCurrentUser');
-        setCurrentUser(null); 
+        setCurrentUser(null);
       }
-    } else {
-      localStorage.removeItem('chiangMaiQuickCurrentUser');
+      setIsLoading(false);
+    });
+
+    const usersUnsubscribe = onSnapshot(query(collection(db, "users")), (snapshot) => {
+      const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
+      setUsers(usersData);
+    });
+    
+    const jobsUnsubscribe = onSnapshot(query(collection(db, "jobs"), orderBy("postedAt", "desc")), (snapshot) => {
+      const jobsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Job));
+      setJobs(jobsData);
+    });
+
+    const helpersUnsubscribe = onSnapshot(query(collection(db, "helperProfiles"), orderBy("postedAt", "desc")), (snapshot) => {
+      const helpersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as HelperProfile));
+      setHelperProfiles(helpersData);
+    });
+
+    const interactionsUnsubscribe = onSnapshot(query(collection(db, "interactions"), orderBy("timestamp", "desc")), (snapshot) => {
+      const interactionsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Interaction));
+      setInteractions(interactionsData);
+    });
+
+    return () => {
+      authUnsubscribe();
+      usersUnsubscribe();
+      jobsUnsubscribe();
+      helpersUnsubscribe();
+      interactionsUnsubscribe();
+    };
+  }, []);
+
+  // Effect to update currentUser's badge status when interactions or their own data changes
+  useEffect(() => {
+    if (currentUser && users.length > 0) {
+      const liveCurrentUserData = users.find(u => u.id === currentUser.id);
+      if (liveCurrentUserData) {
+        setCurrentUser(prevUser => ({
+          ...prevUser!,
+          ...liveCurrentUserData, // get latest from users collection
+          profileComplete: checkProfileCompleteness(liveCurrentUserData),
+          hasBeenContacted: checkHasBeenContacted(liveCurrentUserData.id, interactions),
+        }));
+      }
     }
-  }, [currentUser, users]);
-
-
-  useEffect(() => {
-    localStorage.setItem('chiangMaiQuickJobs', JSON.stringify(jobs));
-  }, [jobs]);
-
-  useEffect(() => {
-    localStorage.setItem('chiangMaiQuickHelpers', JSON.stringify(helperProfiles));
-  }, [helperProfiles]);
+  }, [currentUser?.id, users, interactions]);
 
 
   const navigateTo = (view: View, payload?: any) => {
     if (view === View.PublicProfile && typeof payload === 'string') {
       setViewingProfileId(payload);
     } else {
-      setViewingProfileId(null); 
+      setViewingProfileId(null);
     }
     setCurrentView(view);
     window.scrollTo(0, 0);
@@ -241,87 +213,106 @@ const App: React.FC = () => {
     navigateTo(View.PublicProfile, userId);
   };
 
-  const handleRegister = (userData: Omit<User, 'id' | 'hashedPassword' | 'isAdmin' | 'photo' | 'address' | 'favoriteMusic' | 'favoriteBook' | 'favoriteMovie' | 'hobbies' | 'favoriteFood' | 'dislikedThing' | 'introSentence'> & { password: string }) => {
-    if (users.find(u => u.username.toLowerCase() === userData.username.toLowerCase())) {
-      alert('ชื่อผู้ใช้นี้ถูกใช้ไปแล้ว โปรดเลือกชื่ออื่น');
-      return false;
-    }
-    if (users.find(u => u.email.toLowerCase() === userData.email.toLowerCase())) {
-      alert('อีเมลนี้ถูกใช้ไปแล้ว โปรดใช้อีเมลอื่น');
-      return false;
-    }
-    if (!isValidThaiMobileNumberUtil(userData.mobile)) {
-      alert('รูปแบบเบอร์โทรศัพท์ไม่ถูกต้อง');
-      return false;
-    }
-    if (!userData.gender || !userData.birthdate || !userData.educationLevel) {
-        alert('กรุณากรอกข้อมูลส่วนตัว (เพศ, วันเกิด, ระดับการศึกษา) ให้ครบถ้วน');
+  const handleRegister = async (
+    userData: Omit<User, 'id' | 'isAdmin' | 'photoURL' | 'address' | 'createdAt' | 'profileComplete' | 'hasBeenContacted' | 'favoriteMusic' | 'favoriteBook' | 'favoriteMovie' | 'hobbies' | 'favoriteFood' | 'dislikedThing' | 'introSentence'> & { password: string }
+  ): Promise<boolean> => {
+    try {
+      // Check for existing username (optional, but good for uniqueness beyond email)
+      const usernameQuery = query(collection(db, "users"), where("username", "==", userData.username.toLowerCase()));
+      const usernameSnap = await getDocs(usernameQuery);
+      if (!usernameSnap.empty) {
+        alert('ชื่อผู้ใช้นี้ถูกใช้ไปแล้ว โปรดเลือกชื่ออื่น');
         return false;
-    }
+      }
 
-    const newUser: User = {
-      id: Date.now().toString(),
-      displayName: userData.displayName,
-      username: userData.username,
-      email: userData.email,
-      hashedPassword: userData.password, 
-      isAdmin: (userData.username.toLowerCase() === ADMIN_USERNAME || userData.email.toLowerCase() === ADMIN_EMAIL) && userData.password === ADMIN_PASSWORD,
-      mobile: userData.mobile,
-      lineId: userData.lineId || undefined,
-      facebook: userData.facebook || undefined,
-      gender: userData.gender,
-      birthdate: userData.birthdate,
-      educationLevel: userData.educationLevel,
-      photo: undefined, 
-      address: undefined, 
-      favoriteMusic: undefined,
-      favoriteBook: undefined,
-      favoriteMovie: undefined,
-      hobbies: undefined,
-      favoriteFood: undefined,
-      dislikedThing: undefined,
-      introSentence: undefined,
-    };
-    setUsers(prev => [...prev, newUser]);
-    setCurrentUser(newUser);
-    alert('ลงทะเบียนสำเร็จแล้ว!');
-    navigateTo(View.Home);
-    return true;
-  };
+      const userCredential = await createUserWithEmailAndPassword(auth, userData.email, userData.password);
+      const firebaseUser = userCredential.user;
 
-  const handleLogin = (loginIdentifier: string, passwordAttempt: string) => {
-    const userFromList = users.find(
-      u => (u.username.toLowerCase() === loginIdentifier.toLowerCase() || u.email.toLowerCase() === loginIdentifier.toLowerCase()) &&
-           u.hashedPassword === passwordAttempt
-    );
-    if (userFromList) {
-      const isAdminLogin = (userFromList.username.toLowerCase() === ADMIN_USERNAME || userFromList.email.toLowerCase() === ADMIN_EMAIL) && userFromList.hashedPassword === ADMIN_PASSWORD;
-      setCurrentUser({ ...userFromList, isAdmin: isAdminLogin || userFromList.isAdmin || false });
-      alert(`ยินดีต้อนรับ @${userFromList.displayName}!`);
+      await updateAuthProfile(firebaseUser, { displayName: userData.displayName });
+      
+      const newUserDoc: Omit<User, 'id' | 'profileComplete' | 'hasBeenContacted'> = {
+        displayName: userData.displayName,
+        username: userData.username.toLowerCase(),
+        email: firebaseUser.email!,
+        isAdmin: firebaseUser.email === ADMIN_EMAIL_CONFIG, // Basic admin check
+        mobile: userData.mobile,
+        lineId: userData.lineId || '',
+        facebook: userData.facebook || '',
+        gender: userData.gender,
+        birthdate: userData.birthdate,
+        educationLevel: userData.educationLevel,
+        photoURL: firebaseUser.photoURL || '', // Initially empty or default from auth
+        address: '',
+        // Personality fields empty initially
+        favoriteMusic: '', favoriteBook: '', favoriteMovie: '', hobbies: '', favoriteFood: '', dislikedThing: '', introSentence: '',
+        createdAt: serverTimestamp() as Timestamp,
+      };
+
+      await setDoc(doc(db, "users", firebaseUser.uid), newUserDoc);
+      // setCurrentUser will be set by onAuthStateChanged listener picking up the new user data from Firestore.
+      alert('ลงทะเบียนสำเร็จแล้ว!');
       navigateTo(View.Home);
       return true;
-    } else {
-      alert('ชื่อผู้ใช้/อีเมล หรือรหัสผ่านไม่ถูกต้อง');
+    } catch (error: any) {
+      console.error("Registration error:", error);
+      if (error.code === 'auth/email-already-in-use') {
+        alert('อีเมลนี้ถูกใช้ไปแล้ว โปรดใช้อีเมลอื่น');
+      } else {
+        alert(`เกิดข้อผิดพลาดในการลงทะเบียน: ${error.message}`);
+      }
       return false;
     }
   };
 
-  const handleUpdateUserProfile = (
-    updatedProfileData: Pick<User, 'mobile' | 'lineId' | 'facebook' | 'gender' | 'birthdate' | 'educationLevel' | 'photo' | 'address' | 'favoriteMusic' | 'favoriteBook' | 'favoriteMovie' | 'hobbies' | 'favoriteFood' | 'dislikedThing' | 'introSentence'>
-  ) => {
-    if (!currentUser) {
+  const handleLogin = async (loginIdentifier: string, passwordAttempt: string): Promise<boolean> => {
+    try {
+      // Try login with email first
+      await signInWithEmailAndPassword(auth, loginIdentifier, passwordAttempt);
+      // onAuthStateChanged will handle setting currentUser
+      alert(`ยินดีต้อนรับ!`); // DisplayName will be updated by listener
+      navigateTo(View.Home);
+      return true;
+    } catch (error: any) {
+      // If email login fails, try to find user by username then attempt login with their email
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-email' || error.code === 'auth/wrong-password') {
+        const usernameQuery = query(collection(db, "users"), where("username", "==", loginIdentifier.toLowerCase()));
+        const usernameSnap = await getDocs(usernameQuery);
+        if (!usernameSnap.empty) {
+          const foundUser = usernameSnap.docs[0].data() as User;
+          try {
+            await signInWithEmailAndPassword(auth, foundUser.email, passwordAttempt);
+            alert(`ยินดีต้อนรับ!`);
+            navigateTo(View.Home);
+            return true;
+          } catch (usernameLoginError: any) {
+            alert('ชื่อผู้ใช้/อีเมล หรือรหัสผ่านไม่ถูกต้อง');
+            console.error("Login error (after username lookup):", usernameLoginError);
+            return false;
+          }
+        }
+      }
+      alert('ชื่อผู้ใช้/อีเมล หรือรหัสผ่านไม่ถูกต้อง');
+      console.error("Login error:", error);
+      return false;
+    }
+  };
+
+  const handleUpdateUserProfile = async (
+    updatedProfileData: Pick<User, 'mobile' | 'lineId' | 'facebook' | 'gender' | 'birthdate' | 'educationLevel' | 'photoURL' | 'address' | 'favoriteMusic' | 'favoriteBook' | 'favoriteMovie' | 'hobbies' | 'favoriteFood' | 'dislikedThing' | 'introSentence'> & {newPhotoFile?: File}
+  ): Promise<boolean> => {
+    if (!currentUser || !auth.currentUser) {
       alert('เกิดข้อผิดพลาด: ไม่พบข้อมูลผู้ใช้ปัจจุบัน');
       return false;
     }
-    if (!isValidThaiMobileNumberUtil(updatedProfileData.mobile)) {
+     if (!isValidThaiMobileNumberUtil(updatedProfileData.mobile)) {
       alert('รูปแบบเบอร์โทรศัพท์ไม่ถูกต้อง (เช่น 08X-XXX-XXXX)');
       return false;
     }
-    if (!updatedProfileData.gender || updatedProfileData.gender === GenderOption.NotSpecified) {
+     if (!updatedProfileData.gender || updatedProfileData.gender === GenderOption.NotSpecified) {
       alert('กรุณาเลือกเพศ');
       return false;
     }
-    if (!updatedProfileData.birthdate) { 
+    if (!updatedProfileData.birthdate) {
       alert('กรุณาเลือกวันเกิด');
       return false;
     }
@@ -330,39 +321,66 @@ const App: React.FC = () => {
       return false;
     }
 
-    const updatedUser: User = {
-      ...currentUser,
-      mobile: updatedProfileData.mobile,
-      lineId: updatedProfileData.lineId || undefined,
-      facebook: updatedProfileData.facebook || undefined,
-      gender: updatedProfileData.gender,
-      birthdate: updatedProfileData.birthdate,
-      educationLevel: updatedProfileData.educationLevel,
-      photo: updatedProfileData.photo,
-      address: updatedProfileData.address || undefined,
-      favoriteMusic: updatedProfileData.favoriteMusic || undefined,
-      favoriteBook: updatedProfileData.favoriteBook || undefined,
-      favoriteMovie: updatedProfileData.favoriteMovie || undefined,
-      hobbies: updatedProfileData.hobbies || undefined,
-      favoriteFood: updatedProfileData.favoriteFood || undefined,
-      dislikedThing: updatedProfileData.dislikedThing || undefined,
-      introSentence: updatedProfileData.introSentence || undefined,
-    };
+    try {
+      const userDocRef = doc(db, "users", currentUser.id);
+      let finalPhotoURL = currentUser.photoURL || '';
 
-    setUsers(prevUsers => prevUsers.map(u => u.id === currentUser.id ? updatedUser : u));
-    setCurrentUser(updatedUser);
-    return true; 
+      if (updatedProfileData.newPhotoFile) {
+        const photoFile = updatedProfileData.newPhotoFile;
+        const storageRef = ref(storage, `profilePictures/${currentUser.id}/${photoFile.name}`);
+        
+        // Convert File to base64 string for uploadString
+        const reader = new FileReader();
+        await new Promise<void>((resolve, reject) => {
+            reader.onload = async (event) => {
+                try {
+                    const base64String = event.target?.result as string;
+                    await uploadString(storageRef, base64String, 'data_url');
+                    finalPhotoURL = await getDownloadURL(storageRef);
+                    resolve();
+                } catch (e) {
+                    reject(e);
+                }
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(photoFile);
+        });
+
+        await updateAuthProfile(auth.currentUser, { photoURL: finalPhotoURL });
+      }
+      
+      const { newPhotoFile, ...firestoreData } = updatedProfileData;
+
+      await updateDoc(userDocRef, {
+        ...firestoreData,
+        photoURL: finalPhotoURL, // Ensure photoURL from User type is used
+        displayName: currentUser.displayName, // Assuming display name doesn't change here, or get from auth
+      });
+      // The onSnapshot listener for 'users' will update the local `users` state,
+      // and the effect for `currentUser` will pick up these changes.
+      return true;
+    } catch (error) {
+      console.error("Error updating profile:", error);
+      alert("เกิดข้อผิดพลาดในการอัปเดตโปรไฟล์: " + (error as Error).message);
+      return false;
+    }
   };
 
 
-  const handleLogout = () => {
-    setCurrentUser(null);
-    setItemToEdit(null);
-    setEditingItemType(null);
-    setSourceViewForForm(null);
-    setViewingProfileId(null);
-    alert('ออกจากระบบเรียบร้อยแล้ว');
-    navigateTo(View.Home);
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      // setCurrentUser will be set to null by onAuthStateChanged
+      setItemToEdit(null);
+      setEditingItemType(null);
+      setSourceViewForForm(null);
+      setViewingProfileId(null);
+      alert('ออกจากระบบเรียบร้อยแล้ว');
+      navigateTo(View.Home);
+    } catch (error) {
+      console.error("Logout error:", error);
+      alert('เกิดข้อผิดพลาดในการออกจากระบบ');
+    }
   };
 
   const handleStartEditItemFromAdmin = (item: AdminItemType) => {
@@ -376,7 +394,6 @@ const App: React.FC = () => {
       setSourceViewForForm(View.AdminDashboard);
       navigateTo(item.itemType === 'job' ? View.PostJob : View.OfferHelp);
     } else {
-      console.error("Item not found for editing from Admin:", item);
       alert("เกิดข้อผิดพลาด: ไม่พบรายการที่ต้องการแก้ไข");
     }
   };
@@ -392,79 +409,129 @@ const App: React.FC = () => {
         setSourceViewForForm(View.MyPosts);
         navigateTo(itemType === 'job' ? View.PostJob : View.OfferHelp);
     } else {
-        console.error("Item not found or not owned by user for editing:", itemId, itemType);
         alert("เกิดข้อผิดพลาด: ไม่พบรายการที่ต้องการแก้ไข หรือคุณไม่ใช่เจ้าของโพสต์นี้");
     }
   };
 
-  type JobFormData = Omit<Job, 'id' | 'postedAt' | 'userId' | 'username' | 'isSuspicious' | 'isPinned' | 'isHired' | 'contact'>;
-  type HelperProfileFormData = Omit<HelperProfile, 'id' | 'postedAt' | 'userId' | 'username' | 'isSuspicious' | 'isPinned' | 'isUnavailable' | 'contact' | 'gender' | 'birthdate' | 'educationLevel'>;
+  type JobFormData = Omit<Job, 'id' | 'postedAt' | 'userId' | 'username' | 'contact' | 'isSuspicious' | 'isPinned' | 'isHired'>;
+  type HelperProfileFormData = Omit<HelperProfile, 'id' | 'postedAt' | 'userId' | 'username' | 'contact' | 'gender' | 'birthdate' | 'educationLevel' | 'isSuspicious' | 'isPinned' | 'isUnavailable' | 'adminVerifiedExperience' | 'interestedCount' | 'interestedUserIds'>;
 
-
-  const handleUpdateJob = (updatedJobDataFromForm: JobFormData & { id: string }) => {
-    const originalJob = jobs.find(j => j.id === updatedJobDataFromForm.id);
-    if (!originalJob) {
-      alert('เกิดข้อผิดพลาด: ไม่พบประกาศงานเดิม');
+  const generateContactString = (user: User): string => {
+    let contactParts: string[] = [];
+    if (user.mobile) contactParts.push(`เบอร์โทร: ${user.mobile}`);
+    if (user.lineId) contactParts.push(`LINE ID: ${user.lineId}`);
+    if (user.facebook) contactParts.push(`Facebook: ${user.facebook}`);
+    return contactParts.join('\n') || 'ไม่ระบุช่องทางติดต่อ (โปรดอัปเดตโปรไฟล์)';
+  };
+  
+  const handleSubmitJobForm = async (formDataFromForm: JobFormData & { id?: string }) => {
+    if (!currentUser) {
+      alert("คุณต้องเข้าสู่ระบบก่อน");
+      navigateTo(View.Login);
       return;
     }
-    if (originalJob.userId !== currentUser?.id && !currentUser?.isAdmin) {
-        alert('คุณไม่มีสิทธิ์แก้ไขประกาศงานนี้');
-        return;
+    const contactInfo = generateContactString(currentUser);
+
+    if (formDataFromForm.id && itemToEdit && editingItemType === 'job') { // Editing existing job
+      const jobDocRef = doc(db, "jobs", formDataFromForm.id);
+      const jobToUpdate = { ...formDataFromForm, contact: contactInfo, userId: currentUser.id, username: currentUser.username };
+      delete jobToUpdate.id; // Don't store 'id' field in Firestore document
+      try {
+        await updateDoc(jobDocRef, jobToUpdate);
+        alert('แก้ไขประกาศงานเรียบร้อยแล้ว');
+      } catch (error) {
+        console.error("Error updating job: ", error);
+        alert("เกิดข้อผิดพลาดในการแก้ไขประกาศงาน");
+      }
+    } else { // Adding new job
+      const newJobData = {
+        ...formDataFromForm,
+        contact: contactInfo,
+        userId: currentUser.id,
+        username: currentUser.username,
+        postedAt: serverTimestamp() as Timestamp,
+        isSuspicious: false,
+        isPinned: false,
+        isHired: false,
+      };
+      try {
+        await addDoc(collection(db, "jobs"), newJobData);
+        alert('ประกาศงานของคุณถูกเพิ่มเรียบร้อยแล้ว!');
+      } catch (error) {
+        console.error("Error adding job: ", error);
+        alert("เกิดข้อผิดพลาดในการเพิ่มประกาศงาน");
+      }
     }
-    const contactInfo = currentUser ? generateContactString(currentUser) : 'ข้อมูลติดต่อไม่พร้อมใช้งาน';
-    const updatedJob: Job = {
-      ...originalJob,
-      ...updatedJobDataFromForm,
-      contact: contactInfo,
-    };
-    setJobs(prevJobs => prevJobs.map(j => (j.id === updatedJob.id ? updatedJob : j)));
     setItemToEdit(null);
     setEditingItemType(null);
-    navigateTo(sourceViewForForm || View.Home);
+    navigateTo(sourceViewForForm || View.FindJobs);
     setSourceViewForForm(null);
-    alert('แก้ไขประกาศงานเรียบร้อยแล้ว');
   };
 
-  const handleUpdateHelperProfile = (updatedProfileDataFromForm: HelperProfileFormData & { id: string }) => {
-    const originalProfile = helperProfiles.find(p => p.id === updatedProfileDataFromForm.id);
-    if (!originalProfile) {
-      alert('เกิดข้อผิดพลาด: ไม่พบโปรไฟล์เดิม');
+  const handleSubmitHelperProfileForm = async (formDataFromForm: HelperProfileFormData & { id?: string }) => {
+     if (!currentUser) {
+      alert("คุณต้องเข้าสู่ระบบก่อน");
+      navigateTo(View.Login);
       return;
     }
-    if (originalProfile.userId !== currentUser?.id && !currentUser?.isAdmin) {
-        alert('คุณไม่มีสิทธิ์แก้ไขโปรไฟล์นี้');
+     if (!currentUser.gender || !currentUser.birthdate || !currentUser.educationLevel ||
+        currentUser.gender === GenderOption.NotSpecified || currentUser.educationLevel === HelperEducationLevelOption.NotStated) {
+        alert('กรุณาอัปเดตข้อมูลส่วนตัว (เพศ, วันเกิด, ระดับการศึกษา) ในหน้าโปรไฟล์ของคุณก่อนสร้างโปรไฟล์ผู้ช่วย');
+        navigateTo(View.UserProfile);
         return;
     }
-    const contactInfo = currentUser ? generateContactString(currentUser) : 'ข้อมูลติดต่อไม่พร้อมใช้งาน';
-    const updatedProfile: HelperProfile = {
-      ...originalProfile, 
-      ...updatedProfileDataFromForm,
-      contact: contactInfo,
-    };
-    setHelperProfiles(prevProfiles => prevProfiles.map(p => (p.id === updatedProfile.id ? updatedProfile : p)));
+    const contactInfo = generateContactString(currentUser);
+
+    if (formDataFromForm.id && itemToEdit && editingItemType === 'profile') { // Editing
+      const profileDocRef = doc(db, "helperProfiles", formDataFromForm.id);
+      const profileToUpdate = {
+        ...formDataFromForm,
+        contact: contactInfo,
+        userId: currentUser.id,
+        username: currentUser.username,
+        gender: currentUser.gender,
+        birthdate: currentUser.birthdate,
+        educationLevel: currentUser.educationLevel,
+      };
+      delete profileToUpdate.id;
+      try {
+        await updateDoc(profileDocRef, profileToUpdate);
+        alert('แก้ไขโปรไฟล์ผู้ช่วยเรียบร้อยแล้ว');
+      } catch (error) {
+        console.error("Error updating helper profile: ", error);
+        alert("เกิดข้อผิดพลาดในการแก้ไขโปรไฟล์ผู้ช่วย");
+      }
+    } else { // Adding new
+      const newProfileData = {
+        ...formDataFromForm,
+        contact: contactInfo,
+        userId: currentUser.id,
+        username: currentUser.username,
+        gender: currentUser.gender,
+        birthdate: currentUser.birthdate,
+        educationLevel: currentUser.educationLevel,
+        postedAt: serverTimestamp() as Timestamp,
+        isSuspicious: false,
+        isPinned: false,
+        isUnavailable: false,
+        adminVerifiedExperience: false,
+        interestedCount: 0,
+        interestedUserIds: [],
+      };
+      try {
+        await addDoc(collection(db, "helperProfiles"), newProfileData);
+        alert('โปรไฟล์ของคุณถูกเพิ่มเรียบร้อยแล้ว!');
+      } catch (error) {
+        console.error("Error adding helper profile: ", error);
+        alert("เกิดข้อผิดพลาดในการเพิ่มโปรไฟล์ผู้ช่วย");
+      }
+    }
     setItemToEdit(null);
     setEditingItemType(null);
-    navigateTo(sourceViewForForm || View.Home);
+    navigateTo(sourceViewForForm || View.FindHelpers);
     setSourceViewForForm(null);
-    alert('แก้ไขโปรไฟล์ผู้ช่วยเรียบร้อยแล้ว');
   };
-
-  const handleSubmitJobForm = (formDataFromForm: JobFormData & { id?: string }) => {
-    if (formDataFromForm.id && itemToEdit && editingItemType === 'job') {
-      handleUpdateJob(formDataFromForm as JobFormData & { id: string });
-    } else {
-      handleAddJob(formDataFromForm);
-    }
-  };
-
-  const handleSubmitHelperProfileForm = (formDataFromForm: HelperProfileFormData & { id?: string }) => {
-    if (formDataFromForm.id && itemToEdit && editingItemType === 'profile') {
-      handleUpdateHelperProfile(formDataFromForm as HelperProfileFormData & { id: string });
-    } else {
-      handleAddHelperProfile(formDataFromForm);
-    }
-  };
-
+  
   const handleCancelEditOrPost = () => {
     const targetView = sourceViewForForm || View.Home;
     setItemToEdit(null);
@@ -473,77 +540,10 @@ const App: React.FC = () => {
     navigateTo(targetView);
   };
 
-  const generateContactString = (user: User): string => {
-    let contactParts: string[] = [];
-    if (user.mobile) contactParts.push(`เบอร์โทร: ${user.mobile}`);
-    if (user.lineId) contactParts.push(`LINE ID: ${user.lineId}`);
-    if (user.facebook) contactParts.push(`Facebook: ${user.facebook}`);
-    return contactParts.join('\n') || 'ไม่ระบุช่องทางติดต่อ';
-  };
-
-  const handleAddJob = useCallback((newJobData: JobFormData) => {
-    if (!currentUser) {
-      alert('คุณต้องเข้าสู่ระบบก่อนจึงจะลงประกาศงานได้');
-      navigateTo(View.Login);
-      return;
-    }
-    const contactInfo = generateContactString(currentUser);
-    const newJobWithUser: Job = {
-      ...(newJobData as Omit<Job, 'id' | 'postedAt' | 'userId' | 'username' | 'isSuspicious' | 'isPinned' | 'isHired' | 'contact'>),
-      id: Date.now().toString(),
-      postedAt: new Date().toISOString(),
-      userId: currentUser.id,
-      username: currentUser.username,
-      contact: contactInfo,
-      isSuspicious: false,
-      isPinned: false,
-      isHired: false,
-    };
-    setJobs(prevJobs => [newJobWithUser, ...prevJobs]);
-    navigateTo(sourceViewForForm === View.MyPosts ? View.MyPosts : View.FindJobs);
-    setSourceViewForForm(null);
-    alert('ประกาศงานของคุณถูกเพิ่มเรียบร้อยแล้ว!');
-  }, [currentUser, sourceViewForForm, navigateTo]); 
-
-  const handleAddHelperProfile = useCallback((newProfileData: HelperProfileFormData) => {
-    if (!currentUser) {
-      alert('คุณต้องเข้าสู่ระบบก่อนจึงจะฝากโปรไฟล์ได้');
-      navigateTo(View.Login);
-      return;
-    }
-    if (!currentUser.gender || !currentUser.birthdate || !currentUser.educationLevel ||
-        currentUser.gender === GenderOption.NotSpecified || currentUser.educationLevel === HelperEducationLevelOption.NotStated) {
-        alert('กรุณาอัปเดตข้อมูลส่วนตัว (เพศ, วันเกิด, ระดับการศึกษา) ในหน้าโปรไฟล์ของคุณก่อนสร้างโปรไฟล์ผู้ช่วย');
-        navigateTo(View.UserProfile);
-        return;
-    }
-
-    const contactInfo = generateContactString(currentUser);
-    const newProfileWithUser: HelperProfile = {
-      ...(newProfileData as Omit<HelperProfile, 'id' | 'postedAt' | 'userId' | 'username' | 'isSuspicious' | 'isPinned' | 'isUnavailable' | 'contact' | 'gender' | 'birthdate' | 'educationLevel'>),
-      id: Date.now().toString(),
-      postedAt: new Date().toISOString(),
-      userId: currentUser.id,
-      username: currentUser.username,
-      contact: contactInfo,
-      gender: currentUser.gender,
-      birthdate: currentUser.birthdate,
-      educationLevel: currentUser.educationLevel,
-      isSuspicious: false,
-      isPinned: false,
-      isUnavailable: false,
-    };
-    setHelperProfiles(prevProfiles => [newProfileWithUser, ...prevProfiles]);
-    navigateTo(sourceViewForForm === View.MyPosts ? View.MyPosts : View.FindHelpers);
-    setSourceViewForForm(null);
-    alert('โปรไฟล์ของคุณถูกเพิ่มเรียบร้อยแล้ว!');
-  }, [currentUser, sourceViewForForm, navigateTo]); 
-
-
   const openConfirmModal = (title: string, message: string, onConfirm: () => void) => {
     setConfirmModalTitle(title);
     setConfirmModalMessage(message);
-    setOnConfirmAction(() => onConfirm);
+    setOnConfirmAction(() => onConfirm); // Store the function itself
     setIsConfirmModalOpen(true);
   };
 
@@ -561,163 +561,132 @@ const App: React.FC = () => {
     closeConfirmModal();
   };
 
-  const handleDeleteItemFromMyPosts = (itemId: string, itemType: 'job' | 'profile') => {
-    if (itemType === 'job') {
-        handleDeleteJob(itemId);
-    } else {
-        handleDeleteHelperProfile(itemId);
-    }
-  };
-
-  const handleDeleteJob = (jobId: string) => {
+  const handleDeleteJob = async (jobId: string) => {
     const jobToDelete = jobs.find(job => job.id === jobId);
-    if (!jobToDelete) {
-      alert('เกิดข้อผิดพลาด: ไม่พบประกาศงานที่ต้องการลบในระบบ');
-      return;
-    }
-    if (jobToDelete.userId !== currentUser?.id && !currentUser?.isAdmin) {
-      alert('คุณไม่มีสิทธิ์ลบประกาศงานนี้');
-      return;
-    }
+    if (!jobToDelete) return alert('ไม่พบประกาศงาน');
+    if (jobToDelete.userId !== currentUser?.id && !currentUser?.isAdmin) return alert('คุณไม่มีสิทธิ์ลบ');
 
-    openConfirmModal(
-      'ยืนยันการลบประกาศงาน',
-      `คุณแน่ใจหรือไม่ว่าต้องการลบประกาศงาน "${jobToDelete.title}" (ID: ${jobId})? การกระทำนี้ไม่สามารถย้อนกลับได้`,
-      () => {
-        setJobs(prevJobs => prevJobs.filter(job => job.id !== jobId));
+    openConfirmModal('ยืนยันการลบประกาศงาน', `ต้องการลบ "${jobToDelete.title}"?`, async () => {
+      try {
+        await deleteDoc(doc(db, "jobs", jobId));
         alert(`ลบประกาศงาน "${jobToDelete.title}" เรียบร้อยแล้ว`);
+      } catch (error) {
+        console.error("Error deleting job: ", error);
+        alert("เกิดข้อผิดพลาดในการลบประกาศงาน");
       }
-    );
+    });
   };
 
-  const handleDeleteHelperProfile = (profileId: string) => {
+  const handleDeleteHelperProfile = async (profileId: string) => {
     const profileToDelete = helperProfiles.find(profile => profile.id === profileId);
-     if (!profileToDelete) {
-      alert('เกิดข้อผิดพลาด: ไม่พบโปรไฟล์ที่ต้องการลบในระบบ');
-      return;
-    }
-    if (profileToDelete.userId !== currentUser?.id && !currentUser?.isAdmin) {
-      alert('คุณไม่มีสิทธิ์ลบโปรไฟล์นี้');
-      return;
-    }
-
-    openConfirmModal(
-      'ยืนยันการลบโปรไฟล์',
-      `คุณแน่ใจหรือไม่ว่าต้องการลบโปรไฟล์ "${profileToDelete.profileTitle}" (ID: ${profileId})? การกระทำนี้ไม่สามารถย้อนกลับได้`,
-      () => {
-        setHelperProfiles(prevProfiles => prevProfiles.filter(profile => profile.id !== profileId));
+    if (!profileToDelete) return alert('ไม่พบโปรไฟล์');
+    if (profileToDelete.userId !== currentUser?.id && !currentUser?.isAdmin) return alert('คุณไม่มีสิทธิ์ลบ');
+    
+    openConfirmModal('ยืนยันการลบโปรไฟล์', `ต้องการลบโปรไฟล์ "${profileToDelete.profileTitle}"?`, async () => {
+      try {
+        await deleteDoc(doc(db, "helperProfiles", profileId));
         alert(`ลบโปรไฟล์ "${profileToDelete.profileTitle}" เรียบร้อยแล้ว`);
+      } catch (error) {
+        console.error("Error deleting helper profile: ", error);
+        alert("เกิดข้อผิดพลาดในการลบโปรไฟล์");
       }
-    );
+    });
+  };
+  
+  const handleDeleteItemFromMyPosts = (itemId: string, itemType: 'job' | 'profile') => {
+    if (itemType === 'job') handleDeleteJob(itemId);
+    else handleDeleteHelperProfile(itemId);
   };
 
-  const handleToggleSuspiciousJob = (jobId: string) => {
-    setJobs(prevJobs =>
-      prevJobs.map(job =>
-        job.id === jobId ? { ...job, isSuspicious: !job.isSuspicious } : job
-      )
-    );
+  const handleToggleFirestoreFlag = async (collectionName: string, docId: string, fieldName: string) => {
+    const docRef = doc(db, collectionName, docId);
+    try {
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        await updateDoc(docRef, { [fieldName]: !docSnap.data()?.[fieldName] });
+      }
+    } catch (error) {
+      console.error(`Error toggling ${fieldName} for ${docId} in ${collectionName}: `, error);
+      alert(`เกิดข้อผิดพลาดในการอัปเดตสถานะ`);
+    }
   };
 
-  const handleToggleSuspiciousHelperProfile = (profileId: string) => {
-    setHelperProfiles(prevProfiles =>
-      prevProfiles.map(profile =>
-        profile.id === profileId ? { ...profile, isSuspicious: !profile.isSuspicious } : profile
-      )
-    );
-  };
-
-  const handleTogglePinnedJob = (jobId: string) => {
-    setJobs(prevJobs =>
-      prevJobs.map(job =>
-        job.id === jobId ? { ...job, isPinned: !job.isPinned } : job
-      )
-    );
-  };
-
-  const handleTogglePinnedHelperProfile = (profileId: string) => {
-    setHelperProfiles(prevProfiles =>
-      prevProfiles.map(profile =>
-        profile.id === profileId ? { ...profile, isPinned: !profile.isPinned } : profile
-      )
-    );
-  };
-
-  const handleToggleHiredJobForUserOrAdmin = (jobId: string) => {
-    setJobs(prevJobs =>
-      prevJobs.map(job => {
-        if (job.id === jobId) {
-          if (job.userId === currentUser?.id || currentUser?.isAdmin) {
-            return { ...job, isHired: !job.isHired };
-          }
-        }
-        return job;
-      })
-    );
-  };
-
-  const handleToggleUnavailableHelperProfileForUserOrAdmin = (profileId: string) => {
-    setHelperProfiles(prevProfiles =>
-      prevProfiles.map(profile => {
-        if (profile.id === profileId) {
-          if (profile.userId === currentUser?.id || currentUser?.isAdmin) {
-            return { ...profile, isUnavailable: !profile.isUnavailable };
-          }
-        }
-        return profile;
-      })
-    );
-  };
+  const handleToggleSuspiciousJob = (jobId: string) => handleToggleFirestoreFlag("jobs", jobId, "isSuspicious");
+  const handleToggleSuspiciousHelperProfile = (profileId: string) => handleToggleFirestoreFlag("helperProfiles", profileId, "isSuspicious");
+  const handleTogglePinnedJob = (jobId: string) => handleToggleFirestoreFlag("jobs", jobId, "isPinned");
+  const handleTogglePinnedHelperProfile = (profileId: string) => handleToggleFirestoreFlag("helperProfiles", profileId, "isPinned");
+  const handleToggleVerifiedExperience = (profileId: string) => handleToggleFirestoreFlag("helperProfiles", profileId, "adminVerifiedExperience");
+  const handleToggleHiredJobForUserOrAdmin = (jobId: string) => handleToggleFirestoreFlag("jobs", jobId, "isHired");
+  const handleToggleUnavailableHelperProfileForUserOrAdmin = (profileId: string) => handleToggleFirestoreFlag("helperProfiles", profileId, "isUnavailable");
 
   const handleToggleItemStatusFromMyPosts = (itemId: string, itemType: 'job' | 'profile') => {
-    if (itemType === 'job') {
-        handleToggleHiredJobForUserOrAdmin(itemId);
+    if (itemType === 'job') handleToggleHiredJobForUserOrAdmin(itemId);
+    else handleToggleUnavailableHelperProfileForUserOrAdmin(itemId);
+  };
+  
+  const handleLogHelperContactInteraction = async (helperProfileId: string) => {
+    if (!currentUser) return console.warn("Attempted to log interaction without current user.");
+
+    const helperProfileRef = doc(db, "helperProfiles", helperProfileId);
+    const helperProfileSnap = await getDoc(helperProfileRef);
+
+    if (!helperProfileSnap.exists()) return alert("ไม่พบโปรไฟล์ผู้ช่วย");
+    const helperProfileData = helperProfileSnap.data() as HelperProfile;
+
+    // Check if already interested to avoid duplicate count increment and array add
+    if (helperProfileData.interestedUserIds?.includes(currentUser.id)) {
+      // alert("คุณเคยกดสนใจผู้ช่วยคนนี้แล้ว"); // Alerting might be too intrusive if they just want contact info again
+      // No need to re-log the "interest" part of the interaction if already done.
+      // However, we should still log a general "contact_helper" interaction if that's a separate concept.
+      // For now, we assume "interested" click IS the contact interaction for badge purposes.
     } else {
-        handleToggleUnavailableHelperProfileForUserOrAdmin(itemId);
+      // Atomically update interested count and add user to interestedUserIds
+      await updateDoc(helperProfileRef, {
+        interestedCount: increment(1),
+        interestedUserIds: arrayUnion(currentUser.id)
+      });
     }
+
+    // Log the interaction for "hasBeenContacted" badge, regardless of whether it was a first-time interest.
+    // This assumes any click on "Contact this helper" is an interaction attempt.
+    const newInteraction: Omit<Interaction, 'id'> = {
+      helperUserId: helperProfileData.userId, // The actual User ID of the helper
+      helperProfileId: helperProfileId, // The ID of the HelperProfile document
+      employerUserId: currentUser.id,
+      timestamp: serverTimestamp() as Timestamp,
+      type: 'contact_helper',
+    };
+    await addDoc(collection(db, "interactions"), newInteraction);
+    // State for interactions and helperProfiles will update via their onSnapshot listeners
   };
 
   const handleFeedbackSubmit = async (feedbackText: string): Promise<boolean> => {
     if (!feedbackText.trim()) {
         setFeedbackSubmissionStatus('error');
         setFeedbackSubmissionMessage('กรุณาใส่ความคิดเห็นของคุณ');
-        return false; 
+        return false;
     }
-
     setFeedbackSubmissionStatus('submitting');
     setFeedbackSubmissionMessage(null);
-
     try {
-        const response = await fetch('https://formspree.io/f/xvgaepzq', {
+        const response = await fetch('https://formspree.io/f/xvgaepzq', { // Keep Formspree for feedback
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({
-                feedback: feedbackText,
-                page: currentView,
-                timestamp: new Date().toISOString(),
-                userId: currentUser?.id || 'anonymous',
-                username: currentUser?.username || 'anonymous',
+                feedback: feedbackText, page: currentView, timestamp: new Date().toISOString(),
+                userId: currentUser?.id || 'anonymous', username: currentUser?.username || 'anonymous',
                 userAgent: navigator.userAgent,
             })
         });
-
         if (response.ok) {
             setFeedbackSubmissionStatus('success');
             setFeedbackSubmissionMessage('ขอบคุณสำหรับความคิดเห็นของคุณ!');
-            setIsFeedbackModalOpen(false); 
-
-            setTimeout(() => { 
-                setFeedbackSubmissionStatus('idle');
-                setFeedbackSubmissionMessage(null);
-            }, 4000);
+            setIsFeedbackModalOpen(false);
+            setTimeout(() => { setFeedbackSubmissionStatus('idle'); setFeedbackSubmissionMessage(null); }, 4000);
             return true;
         } else {
             const errorData = await response.json();
-            console.error('Formspree error:', errorData);
-            const errorMessage = errorData.errors?.map((e: { message: string }) => e.message).join(', ') || 'เกิดข้อผิดพลาดในการส่งความคิดเห็น โปรดลองอีกครั้ง';
+            const errorMessage = errorData.errors?.map((e: { message: string }) => e.message).join(', ') || 'เกิดข้อผิดพลาดในการส่งความคิดเห็น';
             setFeedbackSubmissionStatus('error');
             setFeedbackSubmissionMessage(errorMessage);
             return false;
@@ -730,6 +699,13 @@ const App: React.FC = () => {
     }
   };
 
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center h-screen bg-neutral-light dark:bg-dark-pageBg">
+        <div className="text-xl font-semibold text-primary dark:text-dark-primary-DEFAULT">✨ กำลังโหลด หาจ๊อบจ้า... ✨</div>
+      </div>
+    );
+  }
 
   const renderHeader = () => (
     <header
@@ -741,7 +717,7 @@ const App: React.FC = () => {
           onClick={() => navigateTo(View.Home)}
           aria-label="ไปหน้าแรก"
         >
-          {/* ✨ หาจ๊อบจ้า ✨ (Removed) */}
+          {/* ✨ หาจ๊อบจ้า ✨ */}
         </h1>
         <nav className="mt-2 sm:mt-0 flex items-center justify-center sm:justify-end gap-1 sm:gap-2 overflow-x-auto whitespace-nowrap sm:flex-wrap sm:whitespace-normal sm:overflow-x-visible pb-1 sm:pb-0 w-full sm:w-auto">
           {currentUser ? (
@@ -809,7 +785,7 @@ const App: React.FC = () => {
       </div>
     </header>
   );
-
+  
   const renderHome = () => (
     <div className="flex flex-col items-center justify-center min-h-[calc(100vh-150px)] p-6 sm:p-8 text-center">
       <h2 className="text-4xl sm:text-5xl font-quicksand font-bold text-neutral-dark dark:text-dark-text mb-3">
@@ -882,7 +858,7 @@ const App: React.FC = () => {
 
   const renderPostJob = () => {
     if (!currentUser) {
-      setTimeout(() => navigateTo(View.Login), 0);
+      setTimeout(() => navigateTo(View.Login), 0); // Schedule navigation to avoid state update during render
       return <p className="text-center p-8">กำลังเปลี่ยนเส้นทางไปยังหน้าเข้าสู่ระบบ...</p>;
     }
     return (
@@ -900,14 +876,12 @@ const App: React.FC = () => {
       setTimeout(() => navigateTo(View.Login), 0);
       return <p className="text-center p-8">กำลังเปลี่ยนเส้นทางไปยังหน้าเข้าสู่ระบบ...</p>;
     }
-     if (!currentUser.gender || !currentUser.birthdate || !currentUser.educationLevel || currentUser.gender === GenderOption.NotSpecified || currentUser.educationLevel === HelperEducationLevelOption.NotStated) {
-        if (!itemToEdit) { 
-            setTimeout(() => {
-                alert('กรุณาอัปเดตข้อมูลส่วนตัว (เพศ, วันเกิด, ระดับการศึกษา) ในหน้า "โปรไฟล์ของฉัน" ก่อน จึงจะสามารถสร้างโปรไฟล์ผู้ช่วยงานได้');
-                navigateTo(View.UserProfile);
-            }, 0);
-            return <p className="text-center p-8">ข้อมูลส่วนตัวยังไม่ครบถ้วน กำลังเปลี่ยนเส้นทางไปหน้าโปรไฟล์...</p>;
-        }
+     if (!itemToEdit && (!currentUser.gender || !currentUser.birthdate || !currentUser.educationLevel || currentUser.gender === GenderOption.NotSpecified || currentUser.educationLevel === HelperEducationLevelOption.NotStated)) {
+        setTimeout(() => {
+            alert('กรุณาอัปเดตข้อมูลส่วนตัว (เพศ, วันเกิด, ระดับการศึกษา) ในหน้า "โปรไฟล์ของฉัน" ก่อน จึงจะสามารถสร้างโปรไฟล์ผู้ช่วยงานได้');
+            navigateTo(View.UserProfile);
+        }, 0);
+        return <p className="text-center p-8">ข้อมูลส่วนตัวยังไม่ครบถ้วน กำลังเปลี่ยนเส้นทางไปหน้าโปรไฟล์...</p>;
     }
     return (
       <OfferHelpForm
@@ -936,7 +910,7 @@ const App: React.FC = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {jobs.sort((a, b) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0) || new Date(b.postedAt!).getTime() - new Date(a.postedAt!).getTime()).map(job => (
+          {jobs.sort((a, b) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0) || b.postedAt.toMillis() - a.postedAt.toMillis()).map(job => (
             <JobCard key={job.id} job={job} navigateTo={navigateTo} />
           ))}
         </div>
@@ -944,16 +918,21 @@ const App: React.FC = () => {
     </div>
   );
 
-  const renderFindHelpers = () => {
-    const enrichedHelperProfiles: EnrichedHelperProfile[] = helperProfiles.map(hp => {
+ const renderFindHelpers = () => {
+    const enrichedHelperProfilesList: EnrichedHelperProfile[] = helperProfiles.map(hp => {
       const user = users.find(u => u.id === hp.userId);
       return {
         ...hp,
-        userPhoto: user?.photo,
+        userPhotoURL: user?.photoURL,
         userAddress: user?.address, 
         userDisplayName: user?.displayName || user?.username || 'User',
+        verifiedExperienceBadge: hp.adminVerifiedExperience || false,
+        profileCompleteBadge: checkProfileCompleteness(user),
+        hasBeenContactedBadge: checkHasBeenContacted(hp.userId, interactions), // Check based on helper's main user ID
+        warningBadge: hp.isSuspicious || false,
+        interestedCount: hp.interestedCount || 0,
       };
-    }).sort((a, b) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0) || new Date(b.postedAt!).getTime() - new Date(a.postedAt!).getTime());
+    }).sort((a, b) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0) || b.postedAt.toMillis() - a.postedAt.toMillis());
 
     return (
     <div className="container mx-auto p-4 sm:p-8">
@@ -962,7 +941,7 @@ const App: React.FC = () => {
         ลองดูโปรไฟล์ของผู้ที่พร้อมช่วยงานช่วงสั้น ๆ ในเชียงใหม่<br/>
         เลือกคนที่ตรงกับความต้องการ แล้วติดต่อได้เลย
       </p>
-      {enrichedHelperProfiles.length === 0 ? (
+      {enrichedHelperProfilesList.length === 0 ? (
          <div className="text-center py-10">
            <svg className="mx-auto h-24 w-24 text-neutral-DEFAULT dark:text-dark-border" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
             <path vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-2.144M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
@@ -976,8 +955,14 @@ const App: React.FC = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {enrichedHelperProfiles.map(profile => (
-            <HelperCard key={profile.id} profile={profile} onNavigateToPublicProfile={handleNavigateToPublicProfile} navigateTo={navigateTo} />
+          {enrichedHelperProfilesList.map(profile => (
+            <HelperCard 
+              key={profile.id} 
+              profile={profile} 
+              onNavigateToPublicProfile={handleNavigateToPublicProfile} 
+              navigateTo={navigateTo} 
+              onLogHelperContact={handleLogHelperContactInteraction}
+            />
           ))}
         </div>
       )}
@@ -985,26 +970,15 @@ const App: React.FC = () => {
     );
   };
 
-  const renderRegister = () => (
-    <RegistrationForm onRegister={handleRegister} onSwitchToLogin={() => navigateTo(View.Login)} />
-  );
-
-  const renderLogin = () => (
-    <LoginForm onLogin={handleLogin} onSwitchToRegister={() => navigateTo(View.Register)} />
-  );
+  const renderRegister = () => <RegistrationForm onRegister={handleRegister} onSwitchToLogin={() => navigateTo(View.Login)} />;
+  const renderLogin = () => <LoginForm onLogin={handleLogin} onSwitchToRegister={() => navigateTo(View.Register)} />;
 
   const renderUserProfile = () => {
     if (!currentUser) {
       setTimeout(() => navigateTo(View.Login), 0);
       return <p className="text-center p-8">กำลังเปลี่ยนเส้นทางไปยังหน้าเข้าสู่ระบบ...</p>;
     }
-    return (
-      <UserProfilePage
-        currentUser={currentUser}
-        onUpdateProfile={handleUpdateUserProfile}
-        onCancel={() => navigateTo(View.Home)}
-      />
-    );
+    return <UserProfilePage currentUser={currentUser} onUpdateProfile={handleUpdateUserProfile} onCancel={() => navigateTo(View.Home)} />;
   };
 
   const renderAdminDashboard = () => {
@@ -1016,6 +990,8 @@ const App: React.FC = () => {
       <AdminDashboard
         jobs={jobs}
         helperProfiles={helperProfiles}
+        users={users}
+        interactions={interactions}
         onDeleteJob={handleDeleteJob}
         onDeleteHelperProfile={handleDeleteHelperProfile}
         onToggleSuspiciousJob={handleToggleSuspiciousJob}
@@ -1024,14 +1000,15 @@ const App: React.FC = () => {
         onTogglePinnedHelperProfile={handleTogglePinnedHelperProfile}
         onToggleHiredJob={handleToggleHiredJobForUserOrAdmin}
         onToggleUnavailableHelperProfile={handleToggleUnavailableHelperProfileForUserOrAdmin}
-        currentUser={currentUser}
+        onToggleVerifiedExperience={handleToggleVerifiedExperience}
         onStartEditItem={handleStartEditItemFromAdmin}
+        currentUser={currentUser}
       />
     );
   };
 
   const renderMyPostsPage = () => {
-    if (!currentUser || currentUser.isAdmin) {
+    if (!currentUser || currentUser.isAdmin) { // Admins use AdminDashboard
         setTimeout(() => navigateTo(View.Home), 0);
         return <p className="text-center p-8">กำลังเปลี่ยนเส้นทาง...</p>;
     }
@@ -1047,7 +1024,7 @@ const App: React.FC = () => {
         />
     );
   };
-
+  
   const renderAboutUsPage = () => <AboutUsPage />;
   const renderSafetyPage = () => <SafetyPage />; 
 
@@ -1060,54 +1037,31 @@ const App: React.FC = () => {
     if (!profileUser) {
       return <p className="text-center p-8 text-red-500">ไม่พบโปรไฟล์ผู้ใช้</p>;
     }
+    const displayUser: User = {
+        ...profileUser,
+        profileComplete: checkProfileCompleteness(profileUser),
+        hasBeenContacted: checkHasBeenContacted(profileUser.id, interactions),
+    };
     const helperProfileForBio = helperProfiles.find(hp => hp.userId === viewingProfileId);
-    return <PublicProfilePage user={profileUser} helperProfileDetails={helperProfileForBio?.details} onBack={() => navigateTo(View.FindHelpers)} />;
+    return <PublicProfilePage user={displayUser} helperProfile={helperProfileForBio} onBack={() => navigateTo(View.FindHelpers)} />;
   };
-
 
   let currentViewContent;
   switch (currentView) {
-    case View.Home:
-      currentViewContent = renderHome();
-      break;
-    case View.PostJob:
-      currentViewContent = renderPostJob();
-      break;
-    case View.FindJobs:
-      currentViewContent = renderFindJobs();
-      break;
-    case View.OfferHelp:
-      currentViewContent = renderOfferHelpForm();
-      break;
-    case View.FindHelpers:
-      currentViewContent = renderFindHelpers();
-      break;
-    case View.Register:
-      currentViewContent = renderRegister();
-      break;
-    case View.Login:
-      currentViewContent = renderLogin();
-      break;
-    case View.AdminDashboard:
-      currentViewContent = renderAdminDashboard();
-      break;
-    case View.MyPosts:
-      currentViewContent = renderMyPostsPage();
-      break;
-    case View.UserProfile:
-      currentViewContent = renderUserProfile();
-      break;
-    case View.AboutUs:
-      currentViewContent = renderAboutUsPage();
-      break;
-    case View.PublicProfile:
-      currentViewContent = renderPublicProfile();
-      break;
-    case View.Safety: 
-      currentViewContent = renderSafetyPage();
-      break;
-    default:
-      currentViewContent = renderHome();
+    case View.Home: currentViewContent = renderHome(); break;
+    case View.PostJob: currentViewContent = renderPostJob(); break;
+    case View.FindJobs: currentViewContent = renderFindJobs(); break;
+    case View.OfferHelp: currentViewContent = renderOfferHelpForm(); break;
+    case View.FindHelpers: currentViewContent = renderFindHelpers(); break;
+    case View.Register: currentViewContent = renderRegister(); break;
+    case View.Login: currentViewContent = renderLogin(); break;
+    case View.AdminDashboard: currentViewContent = renderAdminDashboard(); break;
+    case View.MyPosts: currentViewContent = renderMyPostsPage(); break;
+    case View.UserProfile: currentViewContent = renderUserProfile(); break;
+    case View.AboutUs: currentViewContent = renderAboutUsPage(); break;
+    case View.PublicProfile: currentViewContent = renderPublicProfile(); break;
+    case View.Safety: currentViewContent = renderSafetyPage(); break;
+    default: currentViewContent = renderHome();
   }
 
   return (
@@ -1127,7 +1081,6 @@ const App: React.FC = () => {
           isOpen={isFeedbackModalOpen}
           onClose={() => {
               setIsFeedbackModalOpen(false);
-              // Reset status only if it wasn't a success that closed it
               if (feedbackSubmissionStatus !== 'success') {
                 setFeedbackSubmissionStatus('idle');
                 setFeedbackSubmissionMessage(null);
@@ -1137,7 +1090,6 @@ const App: React.FC = () => {
           submissionStatus={feedbackSubmissionStatus}
           submissionMessage={feedbackSubmissionMessage}
       />
-      {/* Global Success Toast for Feedback */}
       {feedbackSubmissionStatus === 'success' && feedbackSubmissionMessage && !isFeedbackModalOpen && (
           <div
               className="fixed bottom-24 sm:bottom-5 right-5 p-3 rounded-md shadow-lg text-sm font-medium z-[60] transition-opacity duration-300 ease-in-out bg-green-100 dark:bg-green-700/80 border border-green-300 dark:border-green-500 text-green-700 dark:text-green-200"
@@ -1148,36 +1100,16 @@ const App: React.FC = () => {
       )}
       <footer className="bg-headerBlue-DEFAULT dark:bg-dark-headerBg text-neutral-dark dark:text-dark-text p-4 mt-auto font-normal flex flex-col items-center">
         <div className="container mx-auto flex flex-row flex-wrap justify-center items-center gap-x-1 sm:gap-x-2 gap-y-1 text-xs sm:text-sm">
-            <button
-                onClick={() => navigateTo(View.AboutUs)}
-                className="px-1.5 py-0.5 sm:px-2 sm:py-1 hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
-            >
-                เกี่ยวกับเรา
-            </button>
+            <button onClick={() => navigateTo(View.AboutUs)} className="px-1.5 py-0.5 sm:px-2 sm:py-1 hover:text-primary dark:hover:text-dark-primary-hover transition-colors">เกี่ยวกับเรา</button>
+            <span className="text-neutral-medium dark:text-dark-textMuted inline">|</span>
+            <button onClick={() => navigateTo(View.Safety)} className="px-1.5 py-0.5 sm:px-2 sm:py-1 hover:text-primary dark:hover:text-dark-primary-hover transition-colors">โปรดอ่านเพื่อความปลอดภัย</button>
             <span className="text-neutral-medium dark:text-dark-textMuted inline">|</span>
             <button
-                onClick={() => navigateTo(View.Safety)}
+                onClick={() => { setIsFeedbackModalOpen(true); if(feedbackSubmissionStatus === 'error') { setFeedbackSubmissionStatus('idle'); setFeedbackSubmissionMessage(null);}}}
                 className="px-1.5 py-0.5 sm:px-2 sm:py-1 hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
-            >
-                โปรดอ่านเพื่อความปลอดภัย
-            </button>
-            <span className="text-neutral-medium dark:text-dark-textMuted inline">|</span>
-            <button
-                onClick={() => {
-                    setIsFeedbackModalOpen(true);
-                    // Reset message from previous attempt if user reopens
-                    if(feedbackSubmissionStatus === 'error') {
-                        setFeedbackSubmissionStatus('idle');
-                        setFeedbackSubmissionMessage(null);
-                    }
-                }}
-                className="px-1.5 py-0.5 sm:px-2 sm:py-1 hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
-            >
-                อยากให้เราปรับปรุงอะไร?
-            </button>
+            >อยากให้เราปรับปรุงอะไร?</button>
         </div>
       </footer>
-      {/* Theme Toggle FAB */}
       <button
         onClick={toggleTheme}
         className="fixed bottom-5 right-5 z-40 p-3 rounded-full text-lg shadow-xl hover:scale-105 transform transition-all duration-150 ease-in-out bg-primary text-neutral-dark hover:bg-primary-hover dark:bg-dark-primary-DEFAULT dark:text-dark-textOnPrimaryDark dark:hover:bg-dark-primary-hover"

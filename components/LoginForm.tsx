@@ -1,8 +1,9 @@
+
 import React, { useState } from 'react';
 import { Button } from './Button';
 
 interface LoginFormProps {
-  onLogin: (loginIdentifier: string, passwordAttempt: string) => boolean; // Returns true on success
+  onLogin: (loginIdentifier: string, passwordAttempt: string) => Promise<boolean>; // Returns true on success
   onSwitchToRegister: () => void;
 }
 
@@ -10,22 +11,25 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin, onSwitchToRegiste
   const [loginIdentifier, setLoginIdentifier] = useState(''); // Can be username or email
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const inputBaseStyle = "w-full p-3 bg-white dark:bg-dark-inputBg border border-[#CCCCCC] dark:border-dark-border rounded-[10px] text-neutral-dark dark:text-dark-text font-normal focus:outline-none";
   const inputFocusStyle = "focus:border-primary dark:focus:border-dark-primary-DEFAULT focus:ring-1 focus:ring-primary/50 dark:focus:ring-dark-primary-DEFAULT/50";
   const inputErrorStyle = "border-red-500 dark:border-red-400 focus:border-red-500 dark:focus:border-red-400 focus:ring-1 focus:ring-red-500/50 dark:focus:ring-red-400/50";
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null); 
     if (!loginIdentifier.trim() || !password) {
       setError('กรุณากรอกชื่อผู้ใช้/อีเมล และรหัสผ่าน');
       return;
     }
-    const success = onLogin(loginIdentifier, password);
+    setIsSubmitting(true);
+    const success = await onLogin(loginIdentifier, password);
+    setIsSubmitting(false);
     if (!success) {
       // Error message is shown by App.tsx alert, but we can set local error for immediate feedback if needed.
-      // For now, relying on alert.
+      // setError('ชื่อผู้ใช้/อีเมล หรือรหัสผ่านไม่ถูกต้อง'); // This will be set by App.tsx alert
     } else {
       setLoginIdentifier('');
       setPassword('');
@@ -47,6 +51,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin, onSwitchToRegiste
             onChange={(e) => setLoginIdentifier(e.target.value)}
             className={`${inputBaseStyle} ${error ? inputErrorStyle : inputFocusStyle}`}
             placeholder="กรอกชื่อผู้ใช้หรืออีเมลของคุณ"
+            disabled={isSubmitting}
           />
         </div>
         <div>
@@ -60,11 +65,12 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin, onSwitchToRegiste
             onChange={(e) => setPassword(e.target.value)}
             className={`${inputBaseStyle} ${error ? inputErrorStyle : inputFocusStyle}`}
             placeholder="กรอกรหัสผ่าน"
+            disabled={isSubmitting}
           />
         </div>
         {error && <p className="text-red-500 dark:text-red-400 text-sm text-center">{error}</p>}
-        <Button type="submit" variant="primary" size="lg" className="w-full">
-          เข้าสู่ระบบ
+        <Button type="submit" variant="primary" size="lg" className="w-full" disabled={isSubmitting}>
+          {isSubmitting ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}
         </Button>
         <p className="text-center text-sm text-neutral-dark dark:text-dark-textMuted font-normal">
           ยังไม่มีบัญชี?{' '}

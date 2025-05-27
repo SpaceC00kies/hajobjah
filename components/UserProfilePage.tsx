@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect } from 'react';
 import type { User } from '../types';
 import { GenderOption, HelperEducationLevelOption } from '../types';
@@ -8,7 +7,7 @@ import { isValidThaiMobileNumberUtil } from '../App';
 
 interface UserProfilePageProps {
   currentUser: User;
-  onUpdateProfile: (updatedData: Pick<User, 'mobile' | 'lineId' | 'facebook' | 'gender' | 'birthdate' | 'educationLevel' | 'photo' | 'address' | 'favoriteMusic' | 'favoriteBook' | 'favoriteMovie' | 'hobbies' | 'favoriteFood' | 'dislikedThing' | 'introSentence'>) => boolean;
+  onUpdateProfile: (updatedData: Pick<User, 'mobile' | 'lineId' | 'facebook' | 'gender' | 'birthdate' | 'educationLevel' | 'photoURL' | 'address' | 'favoriteMusic' | 'favoriteBook' | 'favoriteMovie' | 'hobbies' | 'favoriteFood' | 'dislikedThing' | 'introSentence'> & {newPhotoFile?: File} ) => Promise<boolean>;
   onCancel: () => void;
 }
 
@@ -40,7 +39,7 @@ const FallbackAvatar: React.FC<{ name?: string, size?: string }> = ({ name, size
 
 
 export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, onUpdateProfile, onCancel }) => {
-  const [mobile, setMobile] = useState(currentUser.mobile);
+  const [mobile, setMobile] = useState(currentUser.mobile || '');
   const [lineId, setLineId] = useState(currentUser.lineId || '');
   const [facebook, setFacebook] = useState(currentUser.facebook || '');
   const [gender, setGender] = useState(currentUser.gender || GenderOption.NotSpecified);
@@ -48,7 +47,10 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
   const [educationLevel, setEducationLevel] = useState(currentUser.educationLevel || HelperEducationLevelOption.NotStated);
   const [currentAge, setCurrentAge] = useState<number | null>(calculateAge(currentUser.birthdate));
   const [address, setAddress] = useState(currentUser.address || '');
-  const [photoBase64, setPhotoBase64] = useState<string | undefined>(currentUser.photo);
+  
+  const [photoPreview, setPhotoPreview] = useState<string | undefined>(currentUser.photoURL);
+  const [newPhotoFile, setNewPhotoFile] = useState<File | undefined>(undefined);
+
 
   // Personality states
   const [favoriteMusic, setFavoriteMusic] = useState(currentUser.favoriteMusic || '');
@@ -61,9 +63,10 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
   
   const [errors, setErrors] = useState<Partial<Record<UserProfileFormErrorKeys, string>>>({});
   const [feedback, setFeedback] = useState<FeedbackType | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    setMobile(currentUser.mobile);
+    setMobile(currentUser.mobile || '');
     setLineId(currentUser.lineId || '');
     setFacebook(currentUser.facebook || '');
     setGender(currentUser.gender || GenderOption.NotSpecified);
@@ -71,8 +74,9 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
     setEducationLevel(currentUser.educationLevel || HelperEducationLevelOption.NotStated);
     setCurrentAge(calculateAge(currentUser.birthdate));
     setAddress(currentUser.address || '');
-    setPhotoBase64(currentUser.photo);
-    // Update personality states
+    setPhotoPreview(currentUser.photoURL); // Use photoURL
+    setNewPhotoFile(undefined); // Reset new file on current user change
+
     setFavoriteMusic(currentUser.favoriteMusic || '');
     setFavoriteBook(currentUser.favoriteBook || '');
     setFavoriteMovie(currentUser.favoriteMovie || '');
@@ -89,18 +93,20 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
   const selectBaseStyle = `${inputBaseStyle} appearance-none`;
   const textareaBaseStyle = `${inputBaseStyle} min-h-[60px]`;
 
-
   const handlePhotoChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       if (file.size > 2 * 1024 * 1024) { // 2MB limit
         setErrors(prev => ({ ...prev, photo: 'ขนาดรูปภาพต้องไม่เกิน 2MB' }));
-        event.target.value = ''; // Reset file input
+        setPhotoPreview(currentUser.photoURL); // Revert preview to original
+        setNewPhotoFile(undefined);
+        event.target.value = ''; 
         return;
       }
+      setNewPhotoFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
-        setPhotoBase64(reader.result as string);
+        setPhotoPreview(reader.result as string); // Show local preview
         setErrors(prev => ({ ...prev, photo: undefined }));
       };
       reader.onerror = () => {
@@ -127,33 +133,42 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
     
     if (!gender || gender === GenderOption.NotSpecified) newErrors.gender = 'กรุณาเลือกเพศ'; 
     if (!birthdate) newErrors.birthdate = 'กรุณาเลือกวันเกิด';
-    else if (calculateAge(birthdate) === null) newErrors.birthdate = 'กรุณาเลือกวันเกิดที่ถูกต้อง (ต้องไม่ใช่วันในอนาคต)';
+    else if (calculateAge(birthdate) === null || (calculateAge(birthdate) !== null && calculateAge(birthdate)! < 15)) {
+         newErrors.birthdate = 'กรุณาเลือกวันเกิดที่ถูกต้อง (ต้องไม่ใช่วันในอนาคต และอายุไม่ต่ำกว่า 15 ปี)';
+    }
     if (!educationLevel || educationLevel === HelperEducationLevelOption.NotStated) newErrors.educationLevel = 'กรุณาเลือกระดับการศึกษา';
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrors(prev => ({...prev, general: undefined, photo: prev.photo && prev.photo.startsWith('ขนาดรูปภาพต้องไม่เกิน') ? prev.photo : undefined })); // Clear general error, keep photo size error if still relevant
+    setErrors(prev => ({...prev, general: undefined, photo: prev.photo && prev.photo.startsWith('ขนาดรูปภาพต้องไม่เกิน') ? prev.photo : undefined }));
     setFeedback(null); 
 
     if (!validateForm()) {
       setFeedback({ type: 'error', message: 'ข้อมูลไม่ถูกต้อง โปรดตรวจสอบข้อผิดพลาด' });
       return;
     }
-     if (errors.photo) { // If there's still a photo error (e.g. size)
+     if (errors.photo) { 
       setFeedback({ type: 'error', message: errors.photo });
       return;
     }
 
-    const success = onUpdateProfile({ 
-      mobile, lineId, facebook, gender, birthdate, educationLevel, photo: photoBase64, address,
+    setIsSubmitting(true);
+    const success = await onUpdateProfile({ 
+      mobile, lineId, facebook, gender, birthdate, educationLevel, 
+      photoURL: photoPreview, // Pass current preview URL (might be old if no new file)
+      newPhotoFile: newPhotoFile, // Pass the file itself for upload
+      address,
       favoriteMusic, favoriteBook, favoriteMovie, hobbies, favoriteFood, dislikedThing, introSentence
     });
+    setIsSubmitting(false);
+
     if (success) {
       setFeedback({ type: 'success', message: 'อัปเดตโปรไฟล์เรียบร้อยแล้ว!' });
+      setNewPhotoFile(undefined); // Clear staged file after successful upload
     } else {
       setFeedback({ type: 'error', message: 'เกิดข้อผิดพลาดบางอย่าง ไม่สามารถบันทึกข้อมูลได้' });
     }
@@ -190,8 +205,8 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
 
       <form onSubmit={handleSubmit} className="space-y-5">
         <div className="flex flex-col items-center mb-6">
-          {photoBase64 ? (
-            <img src={photoBase64} alt="Profile Preview" className="w-32 h-32 rounded-full object-cover shadow-md mb-3" />
+          {photoPreview ? (
+            <img src={photoPreview} alt="Profile Preview" className="w-32 h-32 rounded-full object-cover shadow-md mb-3" />
           ) : (
             <FallbackAvatar name={currentUser.displayName} size="w-32 h-32" />
           )}
@@ -201,52 +216,29 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
           <input 
             type="file" 
             id="photoUpload" 
-            accept="image/*" 
+            accept="image/jpeg, image/png, image/webp, image/gif" 
             onChange={handlePhotoChange} 
             className="hidden" 
+            disabled={isSubmitting}
           />
           {errors.photo && <p className="text-red-500 dark:text-red-400 text-xs mt-1 text-center">{errors.photo}</p>}
         </div>
 
         <div>
           <label htmlFor="profileDisplayName" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">ชื่อที่แสดง</label>
-          <input 
-            type="text" 
-            id="profileDisplayName" 
-            value={currentUser.displayName} 
-            readOnly
-            className={`${inputBaseStyle} ${readOnlyStyle}`}
-            aria-readonly="true"
-          />
+          <input type="text" id="profileDisplayName" value={currentUser.displayName} readOnly className={`${inputBaseStyle} ${readOnlyStyle}`} aria-readonly="true"/>
         </div>
-
         <div>
           <label htmlFor="profileUsername" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">ชื่อผู้ใช้ (สำหรับเข้าระบบ)</label>
-          <input 
-            type="text" 
-            id="profileUsername" 
-            value={currentUser.username} 
-            readOnly
-            className={`${inputBaseStyle} ${readOnlyStyle}`}
-            aria-readonly="true"
-          />
+          <input type="text" id="profileUsername" value={currentUser.username} readOnly className={`${inputBaseStyle} ${readOnlyStyle}`} aria-readonly="true"/>
         </div>
-
         <div>
           <label htmlFor="profileEmail" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">อีเมล</label>
-          <input 
-            type="email" 
-            id="profileEmail" 
-            value={currentUser.email} 
-            readOnly
-            className={`${inputBaseStyle} ${readOnlyStyle}`}
-            aria-readonly="true"
-          />
+          <input type="email" id="profileEmail" value={currentUser.email} readOnly className={`${inputBaseStyle} ${readOnlyStyle}`} aria-readonly="true"/>
         </div>
         
         <div className="pt-4 border-t border-neutral-DEFAULT/50 dark:border-dark-border/30">
              <h3 className="text-lg font-medium text-neutral-dark dark:text-dark-text mb-3">ข้อมูลส่วนตัว (จะแสดงในโปรไฟล์ผู้ช่วยงาน)</h3>
-            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
                 <div>
                     <label className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">เพศ <span className="text-red-500 dark:text-red-400">*</span></label>
@@ -254,7 +246,7 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
                         {Object.values(GenderOption).map(optionValue => (
                         <label key={optionValue} className="flex items-center space-x-2 cursor-pointer">
                             <input type="radio" name="profileGender" value={optionValue} checked={gender === optionValue} 
-                                    onChange={() => setGender(optionValue)}
+                                    onChange={() => setGender(optionValue)} disabled={isSubmitting}
                                     className="form-radio h-4 w-4 text-secondary dark:text-dark-secondary-DEFAULT border-[#CCCCCC] dark:border-dark-border focus:ring-secondary dark:focus:ring-dark-secondary-DEFAULT"/>
                             <span className="text-neutral-dark dark:text-dark-text font-normal text-sm">{optionValue}</span>
                         </label>
@@ -265,7 +257,7 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
                 <div>
                     <label htmlFor="profileBirthdate" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">วันเกิด <span className="text-red-500 dark:text-red-400">*</span></label>
                     <input type="date" id="profileBirthdate" value={birthdate} onChange={handleBirthdateChange}
-                            max={new Date().toISOString().split("T")[0]}
+                            max={new Date().toISOString().split("T")[0]} disabled={isSubmitting}
                             className={`${inputBaseStyle} ${errors.birthdate ? inputErrorStyle : inputFocusStyle}`} />
                     {currentAge !== null && <p className="text-xs text-neutral-dark dark:text-dark-textMuted mt-1">อายุ: {currentAge} ปี</p>}
                     {errors.birthdate && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.birthdate}</p>}
@@ -275,7 +267,7 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
                 <label htmlFor="profileEducationLevel" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">ระดับการศึกษา <span className="text-red-500 dark:text-red-400">*</span></label>
                 <select id="profileEducationLevel" value={educationLevel} 
                         onChange={(e) => setEducationLevel(e.target.value as HelperEducationLevelOption)}
-                        className={`${selectBaseStyle} ${errors.educationLevel ? inputErrorStyle : inputFocusStyle}`}>
+                        className={`${selectBaseStyle} ${errors.educationLevel ? inputErrorStyle : inputFocusStyle}`} disabled={isSubmitting}>
                     {Object.values(HelperEducationLevelOption).map(level => (
                         <option key={level} value={level}>{level}</option>
                     ))}
@@ -287,11 +279,8 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
         <div className="pt-4 border-t border-neutral-DEFAULT/50 dark:border-dark-border/30">
           <label htmlFor="profileAddress" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">ที่อยู่ (ไม่บังคับ - จะแสดงในโปรไฟล์สาธารณะของคุณ)</label>
           <textarea 
-            id="profileAddress" 
-            value={address} 
-            onChange={(e) => setAddress(e.target.value)}
-            rows={3}
-            className={`${textareaBaseStyle} ${inputFocusStyle}`} 
+            id="profileAddress" value={address} onChange={(e) => setAddress(e.target.value)}
+            rows={3} className={`${textareaBaseStyle} ${inputFocusStyle}`} disabled={isSubmitting}
             placeholder="เช่น บ้านเลขที่, ถนน, ตำบล, อำเภอ, จังหวัด, รหัสไปรษณีย์"
           />
         </div>
@@ -304,75 +293,44 @@ export const UserProfilePage: React.FC<UserProfilePageProps> = ({ currentUser, o
                 {field.label}
               </label>
               {field.type === 'textarea' ? (
-                <textarea
-                  id={`profile-${field.name}`}
-                  value={field.value}
-                  onChange={(e) => field.setter(e.target.value)}
-                  rows={field.name === 'introSentence' ? 3 : 2}
-                  className={`${textareaBaseStyle} ${inputFocusStyle}`}
-                  placeholder={field.placeholder}
-                />
+                <textarea id={`profile-${field.name}`} value={field.value} onChange={(e) => field.setter(e.target.value)}
+                  rows={field.name === 'introSentence' ? 3 : 2} className={`${textareaBaseStyle} ${inputFocusStyle}`}
+                  placeholder={field.placeholder} disabled={isSubmitting} />
               ) : (
-                <input
-                  type="text"
-                  id={`profile-${field.name}`}
-                  value={field.value}
-                  onChange={(e) => field.setter(e.target.value)}
-                  className={`${inputBaseStyle} ${inputFocusStyle}`}
-                  placeholder={field.placeholder}
-                />
+                <input type="text" id={`profile-${field.name}`} value={field.value} onChange={(e) => field.setter(e.target.value)}
+                  className={`${inputBaseStyle} ${inputFocusStyle}`} placeholder={field.placeholder} disabled={isSubmitting}/>
               )}
             </div>
           ))}
         </div>
 
-
         <div className="pt-4 border-t border-neutral-DEFAULT/50 dark:border-dark-border/30">
              <h3 className="text-lg font-medium text-neutral-dark dark:text-dark-text mb-3">ข้อมูลติดต่อ (จะแสดงในโพสต์ของคุณ)</h3>
             <div>
             <label htmlFor="profileMobile" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">เบอร์โทรศัพท์ <span className="text-red-500 dark:text-red-400">*</span></label>
-            <input 
-                type="tel" 
-                id="profileMobile" 
-                value={mobile} 
-                onChange={(e) => setMobile(e.target.value)}
-                className={`${inputBaseStyle} ${errors.mobile ? inputErrorStyle : inputFocusStyle}`} 
-                placeholder="เช่น 0812345678"
-                aria-describedby={errors.mobile ? "mobile-error" : undefined}
-                aria-invalid={!!errors.mobile}
-            />
+            <input type="tel" id="profileMobile" value={mobile} onChange={(e) => setMobile(e.target.value)}
+                className={`${inputBaseStyle} ${errors.mobile ? inputErrorStyle : inputFocusStyle}`} placeholder="เช่น 0812345678"
+                aria-describedby={errors.mobile ? "mobile-error" : undefined} aria-invalid={!!errors.mobile} disabled={isSubmitting}/>
             {errors.mobile && <p id="mobile-error" className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.mobile}</p>}
             </div>
-
             <div className="mt-4">
             <label htmlFor="profileLineId" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">LINE ID (ถ้ามี)</label>
-            <input 
-                type="text" 
-                id="profileLineId" 
-                value={lineId} 
-                onChange={(e) => setLineId(e.target.value)}
-                className={`${inputBaseStyle} ${inputFocusStyle}`} 
-                placeholder="เช่น mylineid"
-            />
+            <input type="text" id="profileLineId" value={lineId} onChange={(e) => setLineId(e.target.value)}
+                className={`${inputBaseStyle} ${inputFocusStyle}`} placeholder="เช่น mylineid" disabled={isSubmitting}/>
             </div>
-
             <div className="mt-4">
             <label htmlFor="profileFacebook" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">Facebook (ถ้ามี)</label>
-            <input 
-                type="text" 
-                id="profileFacebook" 
-                value={facebook} 
-                onChange={(e) => setFacebook(e.target.value)}
-                className={`${inputBaseStyle} ${inputFocusStyle}`} 
-                placeholder="ลิงก์โปรไฟล์ หรือชื่อผู้ใช้ Facebook"
-            />
+            <input type="text" id="profileFacebook" value={facebook} onChange={(e) => setFacebook(e.target.value)}
+                className={`${inputBaseStyle} ${inputFocusStyle}`} placeholder="ลิงก์โปรไฟล์ หรือชื่อผู้ใช้ Facebook" disabled={isSubmitting}/>
             </div>
         </div>
 
         {errors.general && <p className="text-red-500 dark:text-red-400 text-sm text-center">{errors.general}</p>}
         <div className="flex flex-col sm:flex-row gap-4 pt-4">
-            <Button type="submit" variant="secondary" size="lg" className="w-full sm:w-auto flex-grow">💾 บันทึกการเปลี่ยนแปลง</Button>
-            <Button type="button" onClick={onCancel} variant="outline" colorScheme="secondary" size="lg" className="w-full sm:w-auto flex-grow">
+            <Button type="submit" variant="secondary" size="lg" className="w-full sm:w-auto flex-grow" disabled={isSubmitting}>
+                {isSubmitting ? 'กำลังบันทึก...' : '💾 บันทึกการเปลี่ยนแปลง'}
+            </Button>
+            <Button type="button" onClick={onCancel} variant="outline" colorScheme="secondary" size="lg" className="w-full sm:w-auto flex-grow" disabled={isSubmitting}>
                 ยกเลิก
             </Button>
         </div>

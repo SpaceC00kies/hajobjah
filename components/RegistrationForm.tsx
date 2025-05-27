@@ -1,11 +1,11 @@
 
 import React, { useState } from 'react';
-import type { User } from '../types';
+import type { User } from '../types'; // User type from your definitions
 import { GenderOption, HelperEducationLevelOption } from '../types';
 import { Button } from './Button';
 
 interface RegistrationFormProps {
-  onRegister: (userData: Omit<User, 'id' | 'hashedPassword' | 'isAdmin' | 'photo' | 'address'> & { password: string }) => boolean; // Returns true on success
+  onRegister: (userData: Omit<User, 'id' | 'isAdmin' | 'photoURL' | 'address' | 'createdAt' | 'profileComplete' | 'hasBeenContacted' | 'favoriteMusic' | 'favoriteBook' | 'favoriteMovie' | 'hobbies' | 'favoriteFood' | 'dislikedThing' | 'introSentence'> & { password: string }) => Promise<boolean>;
   onSwitchToLogin: () => void;
 }
 
@@ -15,8 +15,8 @@ type RegistrationFormErrorKeys =
 
 const isValidThaiMobileNumber = (mobile: string): boolean => {
   if (!mobile) return false;
-  const cleaned = mobile.replace(/[\s-]/g, ''); // Remove spaces and hyphens
-  return /^0[689]\d{8}$/.test(cleaned); // 10 digits, starting 06, 08, 09
+  const cleaned = mobile.replace(/[\s-]/g, '');
+  return /^0[689]\d{8}$/.test(cleaned);
 };
 
 const calculateAge = (birthdateString?: string): number | null => {
@@ -47,6 +47,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onRegister, 
   const [birthdate, setBirthdate] = useState('');
   const [educationLevel, setEducationLevel] = useState<HelperEducationLevelOption | undefined>(undefined);
   const [currentAge, setCurrentAge] = useState<number | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [errors, setErrors] = useState<Partial<Record<RegistrationFormErrorKeys, string>>>({});
 
@@ -85,38 +86,34 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onRegister, 
     
     if (!gender) newErrors.gender = 'กรุณาเลือกเพศ';
     if (!birthdate) newErrors.birthdate = 'กรุณาเลือกวันเกิด';
-    else if (calculateAge(birthdate) === null) newErrors.birthdate = 'กรุณาเลือกวันเกิดที่ถูกต้อง (ต้องไม่ใช่วันในอนาคต)';
+    else if (calculateAge(birthdate) === null || (calculateAge(birthdate) !== null && calculateAge(birthdate)! < 15) ) {
+         newErrors.birthdate = 'กรุณาเลือกวันเกิดที่ถูกต้อง (ต้องไม่ใช่วันในอนาคต และอายุไม่ต่ำกว่า 15 ปี)';
+    }
 
     if (!educationLevel || educationLevel === HelperEducationLevelOption.NotStated) newErrors.educationLevel = 'กรุณาเลือกระดับการศึกษา';
-
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrors({}); 
     if (!validateForm()) return;
 
-    // Pass undefined for photo and address as they are not collected at registration
-    const success = onRegister({ 
+    setIsSubmitting(true);
+    const success = await onRegister({ 
         displayName, username, email, password, mobile, lineId, facebook,
         gender, birthdate, educationLevel
     });
+    setIsSubmitting(false);
+
     if (success) {
-      setDisplayName('');
-      setUsername('');
-      setEmail('');
-      setPassword('');
-      setConfirmPassword('');
-      setMobile('');
-      setLineId('');
-      setFacebook('');
-      setGender(undefined);
-      setBirthdate('');
-      setEducationLevel(undefined);
-      setCurrentAge(null);
+      setDisplayName(''); setUsername(''); setEmail(''); setPassword('');
+      setConfirmPassword(''); setMobile(''); setLineId(''); setFacebook('');
+      setGender(undefined); setBirthdate(''); setEducationLevel(undefined); setCurrentAge(null);
+    } else {
+      // Error message is shown by App.tsx alert from onRegister
     }
   };
 
@@ -166,7 +163,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onRegister, 
                 <div>
                     <label htmlFor="birthdate" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">วันเกิด <span className="text-red-500 dark:text-red-400">*</span></label>
                     <input type="date" id="birthdate" value={birthdate} onChange={handleBirthdateChange}
-                           max={new Date().toISOString().split("T")[0]} // Prevent future dates
+                           max={new Date().toISOString().split("T")[0]} 
                            className={`${inputBaseStyle} ${errors.birthdate ? inputErrorStyle : inputFocusStyle}`} />
                     {currentAge !== null && <p className="text-xs text-neutral-dark dark:text-dark-textMuted mt-1">อายุ: {currentAge} ปี</p>}
                     {errors.birthdate && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.birthdate}</p>}
@@ -226,7 +223,9 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onRegister, 
         </div>
 
         {errors.general && <p className="text-red-500 dark:text-red-400 text-sm text-center">{errors.general}</p>}
-        <Button type="submit" variant="primary" size="lg" className="w-full mt-6">ลงทะเบียน</Button>
+        <Button type="submit" variant="primary" size="lg" className="w-full mt-6" disabled={isSubmitting}>
+            {isSubmitting ? 'กำลังลงทะเบียน...' : 'ลงทะเบียน'}
+        </Button>
         <p className="text-center text-sm text-neutral-dark dark:text-dark-textMuted font-normal">
           มีบัญชีอยู่แล้ว?{' '}
           <button type="button" onClick={onSwitchToLogin} className="font-medium text-primary dark:text-dark-primary-DEFAULT hover:underline">

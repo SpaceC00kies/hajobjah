@@ -17,7 +17,8 @@ import { MyPostsPage } from './components/MyPostsPage';
 import { UserProfilePage } from './components/UserProfilePage';
 import { AboutUsPage } from './components/AboutUsPage';
 import { PublicProfilePage } from './components/PublicProfilePage';
-import { SafetyPage } from './components/SafetyPage'; // New Import
+import { SafetyPage } from './components/SafetyPage';
+import { FeedbackForm } from './components/FeedbackForm'; // New Import
 
 type Theme = 'light' | 'dark';
 const ADMIN_USERNAME = "admin";
@@ -33,12 +34,18 @@ export const isValidThaiMobileNumberUtil = (mobile: string): boolean => {
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>(View.Home);
   const [theme, setTheme] = useState<Theme>('light');
-  const [viewingProfileId, setViewingProfileId] = useState<string | null>(null); // For public profile
+  const [viewingProfileId, setViewingProfileId] = useState<string | null>(null); 
 
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [confirmModalMessage, setConfirmModalMessage] = useState('');
   const [confirmModalTitle, setConfirmModalTitle] = useState('');
   const [onConfirmAction, setOnConfirmAction] = useState<(() => void) | null>(null);
+
+  // Feedback Form State
+  const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
+  const [feedbackSubmissionStatus, setFeedbackSubmissionStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+  const [feedbackSubmissionMessage, setFeedbackSubmissionMessage] = useState<string | null>(null);
+
 
   const [users, setUsers] = useState<User[]>(() => {
     const savedUsers = localStorage.getItem('chiangMaiQuickUsers');
@@ -202,7 +209,6 @@ const App: React.FC = () => {
       if (liveUser) {
         localStorage.setItem('chiangMaiQuickCurrentUser', JSON.stringify(liveUser));
       } else {
-        // User might have been deleted by admin, log them out
         localStorage.removeItem('chiangMaiQuickCurrentUser');
         setCurrentUser(null); 
       }
@@ -258,7 +264,7 @@ const App: React.FC = () => {
       displayName: userData.displayName,
       username: userData.username,
       email: userData.email,
-      hashedPassword: userData.password, // In a real app, hash this
+      hashedPassword: userData.password, 
       isAdmin: (userData.username.toLowerCase() === ADMIN_USERNAME || userData.email.toLowerCase() === ADMIN_EMAIL) && userData.password === ADMIN_PASSWORD,
       mobile: userData.mobile,
       lineId: userData.lineId || undefined,
@@ -286,7 +292,7 @@ const App: React.FC = () => {
   const handleLogin = (loginIdentifier: string, passwordAttempt: string) => {
     const userFromList = users.find(
       u => (u.username.toLowerCase() === loginIdentifier.toLowerCase() || u.email.toLowerCase() === loginIdentifier.toLowerCase()) &&
-           u.hashedPassword === passwordAttempt // In real app, compare hashed passwords
+           u.hashedPassword === passwordAttempt
     );
     if (userFromList) {
       const isAdminLogin = (userFromList.username.toLowerCase() === ADMIN_USERNAME || userFromList.email.toLowerCase() === ADMIN_EMAIL) && userFromList.hashedPassword === ADMIN_PASSWORD;
@@ -671,6 +677,60 @@ const App: React.FC = () => {
     }
   };
 
+  const handleFeedbackSubmit = async (feedbackText: string): Promise<boolean> => {
+    if (!feedbackText.trim()) {
+        setFeedbackSubmissionStatus('error');
+        setFeedbackSubmissionMessage('กรุณาใส่ความคิดเห็นของคุณ');
+        return false; 
+    }
+
+    setFeedbackSubmissionStatus('submitting');
+    setFeedbackSubmissionMessage(null);
+
+    try {
+        const response = await fetch('https://formspree.io/f/xvgaepzq', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify({
+                feedback: feedbackText,
+                page: currentView,
+                timestamp: new Date().toISOString(),
+                userId: currentUser?.id || 'anonymous',
+                username: currentUser?.username || 'anonymous',
+                userAgent: navigator.userAgent,
+            })
+        });
+
+        if (response.ok) {
+            setFeedbackSubmissionStatus('success');
+            setFeedbackSubmissionMessage('ขอบคุณสำหรับความคิดเห็นของคุณ!');
+            setIsFeedbackModalOpen(false); 
+
+            setTimeout(() => { 
+                setFeedbackSubmissionStatus('idle');
+                setFeedbackSubmissionMessage(null);
+            }, 4000);
+            return true;
+        } else {
+            const errorData = await response.json();
+            console.error('Formspree error:', errorData);
+            const errorMessage = errorData.errors?.map((e: { message: string }) => e.message).join(', ') || 'เกิดข้อผิดพลาดในการส่งความคิดเห็น โปรดลองอีกครั้ง';
+            setFeedbackSubmissionStatus('error');
+            setFeedbackSubmissionMessage(errorMessage);
+            return false;
+        }
+    } catch (error) {
+        console.error('Error submitting feedback:', error);
+        setFeedbackSubmissionStatus('error');
+        setFeedbackSubmissionMessage('เกิดข้อผิดพลาดในการเชื่อมต่อ โปรดลองอีกครั้ง');
+        return false;
+    }
+  };
+
+
   const renderHeader = () => (
     <header
       className="sticky top-0 z-50 w-full bg-headerBlue-DEFAULT dark:bg-dark-headerBg text-neutral-dark dark:text-dark-text p-3 sm:p-6 shadow-md"
@@ -890,7 +950,7 @@ const App: React.FC = () => {
       return {
         ...hp,
         userPhoto: user?.photo,
-        userAddress: user?.address, // For card snippet, or PublicProfilePage can use user.address
+        userAddress: user?.address, 
         userDisplayName: user?.displayName || user?.username || 'User',
       };
     }).sort((a, b) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0) || new Date(b.postedAt!).getTime() - new Date(a.postedAt!).getTime());
@@ -989,11 +1049,11 @@ const App: React.FC = () => {
   };
 
   const renderAboutUsPage = () => <AboutUsPage />;
-  const renderSafetyPage = () => <SafetyPage />; // New render function
+  const renderSafetyPage = () => <SafetyPage />; 
 
   const renderPublicProfile = () => {
     if (!viewingProfileId) {
-      navigateTo(View.Home); // Should not happen if logic is correct
+      navigateTo(View.Home); 
       return <p className="text-center p-8">Loading profile...</p>;
     }
     const profileUser = users.find(u => u.id === viewingProfileId);
@@ -1043,7 +1103,7 @@ const App: React.FC = () => {
     case View.PublicProfile:
       currentViewContent = renderPublicProfile();
       break;
-    case View.Safety: // New Case for Safety Page
+    case View.Safety: 
       currentViewContent = renderSafetyPage();
       break;
     default:
@@ -1063,19 +1123,57 @@ const App: React.FC = () => {
         title={confirmModalTitle}
         message={confirmModalMessage}
       />
-      <footer className="bg-headerBlue-DEFAULT dark:bg-dark-headerBg text-center text-neutral-dark dark:text-dark-text p-4 mt-auto font-normal">
-        <div className="container mx-auto flex flex-col sm:flex-row justify-center items-center gap-x-6 gap-y-2">
+      <FeedbackForm
+          isOpen={isFeedbackModalOpen}
+          onClose={() => {
+              setIsFeedbackModalOpen(false);
+              // Reset status only if it wasn't a success that closed it
+              if (feedbackSubmissionStatus !== 'success') {
+                setFeedbackSubmissionStatus('idle');
+                setFeedbackSubmissionMessage(null);
+              }
+          }}
+          onSubmit={handleFeedbackSubmit}
+          submissionStatus={feedbackSubmissionStatus}
+          submissionMessage={feedbackSubmissionMessage}
+      />
+      {/* Global Success Toast for Feedback */}
+      {feedbackSubmissionStatus === 'success' && feedbackSubmissionMessage && !isFeedbackModalOpen && (
+          <div
+              className="fixed bottom-24 sm:bottom-5 right-5 p-3 rounded-md shadow-lg text-sm font-medium z-[60] transition-opacity duration-300 ease-in-out bg-green-100 dark:bg-green-700/80 border border-green-300 dark:border-green-500 text-green-700 dark:text-green-200"
+              role="alert"
+          >
+              {feedbackSubmissionMessage}
+          </div>
+      )}
+      <footer className="bg-headerBlue-DEFAULT dark:bg-dark-headerBg text-neutral-dark dark:text-dark-text p-4 mt-auto font-normal">
+        <div className="container mx-auto flex flex-row flex-wrap justify-center items-center gap-y-1 text-sm">
             <button
                 onClick={() => navigateTo(View.AboutUs)}
-                className="hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
+                className="px-2 py-1 hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
             >
-                เกี่ยวกับเรา
+                ℹ️ เกี่ยวกับเรา
             </button>
+            <span className="text-neutral-medium dark:text-dark-textMuted inline mx-1">|</span>
             <button
                 onClick={() => navigateTo(View.Safety)}
-                className="hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
+                className="px-2 py-1 hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
             >
                 🔒 โปรดอ่านเพื่อความปลอดภัย
+            </button>
+            <span className="text-neutral-medium dark:text-dark-textMuted inline mx-1">|</span>
+            <button
+                onClick={() => {
+                    setIsFeedbackModalOpen(true);
+                    // Reset message from previous attempt if user reopens
+                    if(feedbackSubmissionStatus === 'error') {
+                        setFeedbackSubmissionStatus('idle');
+                        setFeedbackSubmissionMessage(null);
+                    }
+                }}
+                className="px-2 py-1 hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
+            >
+                💬 อยากให้เราปรับปรุงอะไร?
             </button>
         </div>
       </footer>

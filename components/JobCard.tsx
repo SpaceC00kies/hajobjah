@@ -150,7 +150,7 @@ export const JobCard: React.FC<JobCardProps> = ({ job, navigateTo }) => {
             <strong className="font-medium text-neutral-dark dark:text-dark-text">📝 รายละเอียดงาน:</strong>
             <div className="mt-1 text-sm bg-neutral-light dark:bg-dark-inputBg dark:text-dark-text p-3 rounded-md whitespace-pre-wrap h-24 overflow-y-auto font-normal border border-neutral-DEFAULT/50 dark:border-dark-border/50">{job.description || 'ไม่มีรายละเอียดเพิ่มเติม'}</div>
           </div>
-          {job.username && (<p className="text-xs sm:text-sm text-neutral-medium dark:text-dark-textMuted mt-3">📎 โพสต์โดย: @{job.username}</p>)}
+          {job.username && (<p className="text-xs sm:text-sm text-neutral-medium dark:text-dark-textMuted mt-3 ml-2">📎 โพสต์โดย: @{job.username}</p>)}
           {formattedPostedAt && (
             <p className="text-xs sm:text-sm text-neutral-medium dark:text-dark-textMuted mt-1 pt-2 border-t border-neutral-DEFAULT/30 dark:border-dark-border/20">📅 โพสต์เมื่อ: {formattedPostedAt}</p>
           )}

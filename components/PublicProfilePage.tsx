@@ -38,7 +38,6 @@ const TrustBadgesPublicProfile: React.FC<{ user: User, helperProfile?: HelperPro
     <div className="flex gap-1 flex-wrap my-3 justify-center">
       {helperProfile?.adminVerifiedExperience && (<span className="bg-yellow-200 text-yellow-800 dark:bg-yellow-600/30 dark:text-yellow-200 text-sm px-2.5 py-1 rounded-full font-medium">⭐ ผ่านงานมาก่อน</span>)}
       {user.profileComplete && (<span className="bg-green-100 text-green-700 dark:bg-green-700/30 dark:text-green-200 text-sm px-2.5 py-1 rounded-full font-medium">🟢 โปรไฟล์ครบถ้วน</span>)}
-      {user.hasBeenContacted && (<span className="bg-blue-100 text-blue-700 dark:bg-blue-700/30 dark:text-blue-200 text-sm px-2.5 py-1 rounded-full font-medium">📌 มีผู้ติดต่อแล้ว</span>)}
       {(helperProfile?.interestedCount || 0) > 0 && (<span className="bg-blue-100 text-blue-700 dark:bg-blue-700/30 dark:text-blue-200 text-sm px-2.5 py-1 rounded-full font-medium">📌 มีผู้กดสนใจแล้ว {helperProfile.interestedCount} ครั้ง</span>)}
       {helperProfile?.isSuspicious && (<span className="bg-red-100 text-red-700 dark:bg-red-700/30 dark:text-red-200 text-sm px-2.5 py-1 rounded-full font-medium">🔺 ระวังผู้ใช้นี้</span>)}
     </div>

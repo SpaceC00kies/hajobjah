@@ -2,7 +2,7 @@
 import React from 'react';
 import type { Job, HelperProfile, User, Interaction } from '../types'; 
 import { Button } from './Button';
-import { checkProfileCompleteness, checkHasBeenContacted } from '../App'; 
+import { checkProfileCompleteness } from '../App'; 
 import type { Timestamp } from 'firebase/firestore';
 
 export interface AdminItem { 
@@ -18,8 +18,7 @@ export interface AdminItem {
   originalItem: Job | HelperProfile;
 
   adminVerifiedExperience?: boolean;
-  profileComplete?: boolean;        
-  hasBeenContacted?: boolean;       
+  profileComplete?: boolean;
 }
 
 interface AdminDashboardProps {
@@ -79,8 +78,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             isPinned: profile.isPinned, isSuspicious: profile.isSuspicious,
             isHiredOrUnavailable: profile.isUnavailable, originalItem: profile,
             adminVerifiedExperience: profile.adminVerifiedExperience || false,
-            profileComplete: checkProfileCompleteness(user),
-            hasBeenContacted: checkHasBeenContacted(profile.userId, interactions), // Check based on helper's main user ID
+            profileComplete: checkProfileCompleteness(user)
         };
     }),
   ];
@@ -105,7 +103,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       <div className="flex gap-1 flex-wrap my-1">
         {item.adminVerifiedExperience && <span className="bg-yellow-200 text-yellow-800 dark:bg-yellow-600/30 dark:text-yellow-200 text-xs px-2 py-0.5 rounded-full font-medium">⭐ ผ่านงาน</span>}
         {item.profileComplete && <span className="bg-green-100 text-green-700 dark:bg-green-700/30 dark:text-green-200 text-xs px-2 py-0.5 rounded-full font-medium">🟢 ครบถ้วน</span>}
-        {item.hasBeenContacted && <span className="bg-blue-100 text-blue-700 dark:bg-blue-700/30 dark:text-blue-200 text-xs px-2 py-0.5 rounded-full font-medium">📌 ผู้ติดต่อ</span>}
         {item.isSuspicious && <span className="bg-red-100 text-red-700 dark:bg-red-700/30 dark:text-red-200 text-xs px-2 py-0.5 rounded-full font-medium">🔺 ระวัง</span>}
       </div>
     );

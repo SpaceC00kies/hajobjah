@@ -65,7 +65,6 @@ const TrustBadgesDisplay: React.FC<{ profile: EnrichedHelperProfile }> = ({ prof
     <div className="flex gap-1 flex-wrap my-2">
       {profile.verifiedExperienceBadge && (<span className="bg-yellow-200 text-yellow-800 dark:bg-yellow-600/30 dark:text-yellow-200 text-xs px-2 py-0.5 rounded-full font-medium">⭐ ผ่านงานมาก่อน</span>)}
       {profile.profileCompleteBadge && (<span className="bg-green-100 text-green-700 dark:bg-green-700/30 dark:text-green-200 text-xs px-2 py-0.5 rounded-full font-medium">🟢 โปรไฟล์ครบถ้วน</span>)}
-      {profile.hasBeenContactedBadge && (<span className="bg-blue-100 text-blue-700 dark:bg-blue-700/30 dark:text-blue-200 text-xs px-2 py-0.5 rounded-full font-medium">📌 มีผู้ติดต่อแล้ว</span>)}
       {(profile.interestedCount || 0) > 0 && (<span className="bg-blue-100 text-blue-700 dark:bg-blue-700/30 dark:text-blue-200 text-xs px-2 py-0.5 rounded-full font-medium">📌 มีผู้กดสนใจแล้ว {profile.interestedCount} ครั้ง</span>)}
       {profile.warningBadge && (<span className="bg-red-100 text-red-700 dark:bg-red-700/30 dark:text-red-200 text-xs px-2 py-0.5 rounded-full font-medium">🔺 ระวังผู้ใช้นี้</span>)}
     </div>
@@ -113,7 +112,7 @@ export const HelperCard: React.FC<HelperCardProps> = ({ profile, onNavigateToPub
 
         <div className="flex items-start mb-1">
           {profile.userPhotoURL ? (<img src={profile.userPhotoURL} alt={profile.userDisplayName} className="w-16 h-16 rounded-full object-cover mr-4 shadow" />) : (<FallbackAvatarDisplay name={profile.userDisplayName} />)}
-          <div className="flex-1">
+          <div className="flex-1 ml-2">
             <h3 className="text-2xl font-semibold text-secondary-hover dark:text-dark-secondary-hover">{profile.profileTitle}</h3>
             <p className="text-sm text-neutral-medium dark:text-dark-textMuted">โดย: @{profile.username}</p>
           </div>

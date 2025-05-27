@@ -1,5 +1,10 @@
 
 
+
+
+
+
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { Job, HelperProfile, User, EnrichedHelperProfile } from './types';
 import type { AdminItem as AdminItemType } from './components/AdminDashboard';
@@ -743,10 +748,10 @@ const App: React.FC = () => {
         >
           {/* ✨ หาจ๊อบจ้า ✨ (Removed) */}
         </h1>
-        <nav className="mt-2 sm:mt-0 flex items-center justify-center sm:justify-end gap-2 overflow-x-auto whitespace-nowrap sm:flex-wrap sm:whitespace-normal sm:overflow-x-visible pb-1 sm:pb-0 w-full sm:w-auto">
+        <nav className="mt-2 sm:mt-0 flex items-center justify-center sm:justify-end gap-1 sm:gap-2 overflow-x-auto whitespace-nowrap sm:flex-wrap sm:whitespace-normal sm:overflow-x-visible pb-1 sm:pb-0 w-full sm:w-auto">
           {currentUser ? (
             <>
-              <span className="text-sm font-medium mr-1 flex-shrink-0">สวัสดี, @{currentUser.displayName}!</span>
+              <span className="text-xs sm:text-sm font-medium mr-1 flex-shrink-0">สวัสดี, @{currentUser.displayName}!</span>
               {currentUser.isAdmin && (
                 <Button onClick={() => navigateTo(View.AdminDashboard)} variant="accent" size="sm" className="flex-shrink-0">
                   🔐 Admin
@@ -1147,21 +1152,21 @@ const App: React.FC = () => {
           </div>
       )}
       <footer className="bg-headerBlue-DEFAULT dark:bg-dark-headerBg text-neutral-dark dark:text-dark-text p-4 mt-auto font-normal">
-        <div className="container mx-auto flex flex-row flex-wrap justify-center items-center gap-y-1 text-sm">
+        <div className="container mx-auto flex flex-row flex-wrap justify-center items-center gap-x-1 sm:gap-x-2 gap-y-1 text-xs sm:text-sm">
             <button
                 onClick={() => navigateTo(View.AboutUs)}
-                className="px-2 py-1 hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
+                className="px-1.5 py-0.5 sm:px-2 sm:py-1 hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
             >
-                ℹ️ เกี่ยวกับเรา
+                เกี่ยวกับเรา
             </button>
-            <span className="text-neutral-medium dark:text-dark-textMuted inline mx-1">|</span>
+            <span className="text-neutral-medium dark:text-dark-textMuted inline">|</span>
             <button
                 onClick={() => navigateTo(View.Safety)}
-                className="px-2 py-1 hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
+                className="px-1.5 py-0.5 sm:px-2 sm:py-1 hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
             >
-                🔒 โปรดอ่านเพื่อความปลอดภัย
+                โปรดอ่านเพื่อความปลอดภัย
             </button>
-            <span className="text-neutral-medium dark:text-dark-textMuted inline mx-1">|</span>
+            <span className="text-neutral-medium dark:text-dark-textMuted inline">|</span>
             <button
                 onClick={() => {
                     setIsFeedbackModalOpen(true);
@@ -1171,18 +1176,18 @@ const App: React.FC = () => {
                         setFeedbackSubmissionMessage(null);
                     }
                 }}
-                className="px-2 py-1 hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
+                className="px-1.5 py-0.5 sm:px-2 sm:py-1 hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
             >
-                💬 อยากให้เราปรับปรุงอะไร?
+                อยากให้เราปรับปรุงอะไร?
             </button>
         </div>
       </footer>
       <button
         onClick={toggleTheme}
-        className="fixed bottom-5 right-5 z-50 py-3 px-5 rounded-full bg-accent text-neutral-dark dark:text-dark-textOnAccentDark text-base font-semibold shadow-lg hover:scale-105 hover:shadow-xl transform transition-all duration-150 ease-in-out"
+        className="fixed bottom-5 right-5 z-50 py-2 px-3 rounded-full bg-accent text-neutral-dark dark:text-dark-textOnAccentDark text-sm font-semibold shadow-lg hover:scale-105 hover:shadow-xl transform transition-all duration-150 ease-in-out"
         aria-label="Toggle theme"
       >
-        {theme === 'light' ? '🌙 แสบตา?' : '☀️ สบายตาขึ้น?'}
+        {'🌙 | ☀️'}
       </button>
     </div>
   );

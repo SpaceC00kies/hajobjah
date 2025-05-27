@@ -1,5 +1,5 @@
 
-
+import "./firebase";
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { Job, HelperProfile, User, EnrichedHelperProfile } from './types';
 import type { AdminItem as AdminItemType } from './components/AdminDashboard';

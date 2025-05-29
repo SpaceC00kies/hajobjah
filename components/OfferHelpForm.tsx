@@ -2,16 +2,14 @@
 import React, { useState, useEffect } from 'react';
 import type { HelperProfile } from '../types';
 import { Button } from './Button';
+import { containsBlacklistedWords } from '../App'; // Import blacklist checker
 
-// FormDataType for fields managed here
-// Excludes: id, postedAt, userId, username, contact, gender, birthdate, educationLevel (all derived/snapshot), admin fields, interested fields
-type FormDataType = Omit<HelperProfile, 'id' | 'postedAt' | 'userId' | 'username' | 'contact' | 'gender' | 'birthdate' | 'educationLevel' | 'isSuspicious' | 'isPinned' | 'isUnavailable' | 'adminVerifiedExperience' | 'interestedCount' | 'interestedUserIds'>;
-
+type FormDataType = Omit<HelperProfile, 'id' | 'postedAt' | 'userId' | 'username' | 'isSuspicious' | 'isPinned' | 'isUnavailable' | 'contact' | 'gender' | 'birthdate' | 'educationLevel' | 'adminVerifiedExperience' | 'interestedCount'>;
 
 interface OfferHelpFormProps {
-  onSubmitProfile: (profileData: FormDataType & { id?: string }) => Promise<void>; 
+  onSubmitProfile: (profileData: FormDataType & { id?: string }) => void; 
   onCancel: () => void;
-  initialData?: HelperProfile;
+  initialData?: HelperProfile; 
   isEditing?: boolean;
 }
 
@@ -25,19 +23,18 @@ const initialFormStateForCreate: FormDataType = {
   availabilityTimeDetails: '', 
 };
 
-type FormErrorsType = Partial<Record<keyof FormDataType, string>>;
+type FormErrorsType = Partial<Record<Exclude<keyof HelperProfile, 'id' | 'postedAt' | 'userId' | 'username' | 'isSuspicious' | 'isPinned' | 'isUnavailable' | 'contact' | 'gender' | 'birthdate' | 'educationLevel' | 'adminVerifiedExperience' | 'interestedCount'>, string>>;
 
 
 export const OfferHelpForm: React.FC<OfferHelpFormProps> = ({ onSubmitProfile, onCancel, initialData, isEditing }) => {
   const [formData, setFormData] = useState<FormDataType>(initialFormStateForCreate);
   const [formErrors, setFormErrors] = useState<FormErrorsType>({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (isEditing && initialData) {
       const { 
-        id, postedAt, userId, username, contact, gender, birthdate, educationLevel, 
-        isSuspicious, isPinned, isUnavailable, adminVerifiedExperience, interestedCount, interestedUserIds,
+        id, postedAt, userId, username, isSuspicious, isPinned, isUnavailable, contact,
+        gender, birthdate, educationLevel, adminVerifiedExperience, interestedCount, 
         ...editableFields 
       } = initialData;
       setFormData(editableFields as FormDataType); 
@@ -49,7 +46,9 @@ export const OfferHelpForm: React.FC<OfferHelpFormProps> = ({ onSubmitProfile, o
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     const key = name as keyof FormDataType; 
+
     setFormData(prev => ({ ...prev, [key]: value }));
+
     if (formErrors[key as keyof FormErrorsType]) { 
       setFormErrors(prev => ({ ...prev, [key as keyof FormErrorsType]: undefined }));
     }
@@ -58,7 +57,11 @@ export const OfferHelpForm: React.FC<OfferHelpFormProps> = ({ onSubmitProfile, o
   const validateForm = () => {
     const errors: FormErrorsType = {};
     if (!formData.profileTitle.trim()) errors.profileTitle = 'กรุณากรอกหัวข้อโปรไฟล์';
+    else if (containsBlacklistedWords(formData.profileTitle)) errors.profileTitle = 'หัวข้อโปรไฟล์มีคำที่ไม่เหมาะสม โปรดแก้ไข';
+    
     if (!formData.details.trim()) errors.details = 'กรุณากรอกรายละเอียดเกี่ยวกับตัวเอง';
+    else if (containsBlacklistedWords(formData.details)) errors.details = 'รายละเอียดมีคำที่ไม่เหมาะสม โปรดแก้ไข';
+
     if (!formData.area.trim()) errors.area = 'กรุณากรอกพื้นที่ที่สะดวก';
     
     if (formData.availabilityDateFrom && formData.availabilityDateTo && formData.availabilityDateTo < formData.availabilityDateFrom) {
@@ -68,17 +71,15 @@ export const OfferHelpForm: React.FC<OfferHelpFormProps> = ({ onSubmitProfile, o
     return Object.keys(errors).length === 0;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateForm()) return;
 
-    setIsSubmitting(true);
     const dataToSubmit: FormDataType & { id?: string } = { ...formData }; 
     if (isEditing && initialData) {
       dataToSubmit.id = initialData.id;
     }
-    await onSubmitProfile(dataToSubmit);
-    setIsSubmitting(false);
+    onSubmitProfile(dataToSubmit);
      if (!isEditing) {
         setFormData(initialFormStateForCreate);
     }
@@ -90,75 +91,88 @@ export const OfferHelpForm: React.FC<OfferHelpFormProps> = ({ onSubmitProfile, o
     { name: 'availability', label: 'หมายเหตุเรื่องวันเวลาที่ว่างโดยรวม (ถ้ามี)', placeholder: 'เช่น "สะดวกเฉพาะช่วงเย็น", "ไม่ว่างวันที่ 10-15 นี้"', type: 'text', required: false },
   ] as const;
   
-  const inputBaseStyle = "w-full p-3 bg-white dark:bg-dark-inputBg border border-[#CCCCCC] dark:border-dark-border rounded-[10px] text-neutral-dark dark:text-dark-text font-normal focus:outline-none";
-  const inputFocusStyle = "focus:border-secondary dark:focus:border-dark-secondary-DEFAULT focus:ring-1 focus:ring-secondary/50 dark:focus:ring-dark-secondary-DEFAULT/50";
-  const inputErrorStyle = "border-red-500 dark:border-red-400 focus:border-red-500 dark:focus:border-red-400 focus:ring-1 focus:ring-red-500/50 dark:focus:ring-red-400/50";
+  const inputBaseStyle = "w-full p-3 bg-white dark:bg-dark-inputBg border border-[#CCCCCC] dark:border-dark-border rounded-[10px] text-neutral-dark dark:text-dark-text font-serif font-normal focus:outline-none";
+  const inputFocusStyle = "focus:border-secondary dark:focus:border-dark-secondary-DEFAULT focus:ring-2 focus:ring-secondary focus:ring-opacity-70 dark:focus:ring-dark-secondary-DEFAULT dark:focus:ring-opacity-70";
+  const inputErrorStyle = "border-red-500 dark:border-red-400 focus:border-red-500 dark:focus:border-red-400 focus:ring-2 focus:ring-red-500 focus:ring-opacity-70 dark:focus:ring-red-400 dark:focus:ring-opacity-70";
 
   return (
     <div className="bg-white dark:bg-dark-cardBg p-8 rounded-xl shadow-2xl w-full max-w-2xl mx-auto my-8 border border-neutral-DEFAULT dark:border-dark-border">
-      <h2 className="text-3xl font-semibold text-secondary-hover dark:text-dark-secondary-hover mb-2 text-center">
+      <h2 className="text-3xl font-sans font-semibold text-secondary-hover dark:text-dark-secondary-hover mb-2 text-center">
         {isEditing ? '📝 แก้ไขโปรไฟล์ผู้ช่วย' : '🙋‍♀️ ฝากโปรไฟล์ไว้ เผื่อมีใครต้องการคนช่วย'}
       </h2>
-      <p className="text-md text-neutral-dark dark:text-dark-textMuted mb-6 text-center font-normal">
+      <p className="text-md font-serif text-neutral-dark dark:text-dark-textMuted mb-6 text-center font-normal">
         {isEditing 
           ? 'แก้ไขข้อมูลโปรไฟล์ของคุณ (ข้อมูลส่วนตัว เช่น เพศ, อายุ, การศึกษา และข้อมูลติดต่อ จะใช้จากโปรไฟล์หลักของคุณ)' 
           : 'ระบุว่าคุณช่วยอะไรได้ ว่างช่วงไหน ทำงานแถวไหนได้ (ข้อมูลส่วนตัว เช่น เพศ, อายุ, การศึกษา และข้อมูลติดต่อ จะดึงมาจากโปรไฟล์หลักของคุณโดยอัตโนมัติ)'}
       </p>
       <form onSubmit={handleSubmit} className="space-y-6">
+        
         <div className="pt-4 border-t border-neutral-DEFAULT dark:border-dark-border/50 mt-6">
-            <h3 className="text-xl font-semibold text-neutral-dark dark:text-dark-text mb-4">ช่วงเวลาที่สะดวกทำงาน</h3>
+            <h3 className="text-xl font-sans font-semibold text-neutral-dark dark:text-dark-text mb-4">ช่วงเวลาที่สะดวกทำงาน</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-4">
                 <div>
-                    <label htmlFor="availabilityDateFrom" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">ช่วงวันที่ว่าง: ตั้งแต่</label>
+                    <label htmlFor="availabilityDateFrom" className="block text-sm font-sans font-medium text-neutral-dark dark:text-dark-text mb-1">ช่วงวันที่ว่าง: ตั้งแต่</label>
                     <input type="date" id="availabilityDateFrom" name="availabilityDateFrom" value={formData.availabilityDateFrom || ''} onChange={handleChange}
-                        className={`${inputBaseStyle} ${formErrors.availabilityDateFrom ? inputErrorStyle : inputFocusStyle}`} disabled={isSubmitting}/>
-                    {formErrors.availabilityDateFrom && <p className="text-red-500 dark:text-red-400 text-xs mt-1 font-normal">{formErrors.availabilityDateFrom}</p>}
+                        className={`${inputBaseStyle} ${formErrors.availabilityDateFrom ? inputErrorStyle : inputFocusStyle}`} />
+                    {formErrors.availabilityDateFrom && <p className="text-red-500 font-sans dark:text-red-400 text-xs mt-1 font-normal">{formErrors.availabilityDateFrom}</p>}
                 </div>
                 <div>
-                    <label htmlFor="availabilityDateTo" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">ถึง (ถ้ามี)</label>
+                    <label htmlFor="availabilityDateTo" className="block text-sm font-sans font-medium text-neutral-dark dark:text-dark-text mb-1">ถึง (ถ้ามี)</label>
                     <input type="date" id="availabilityDateTo" name="availabilityDateTo" value={formData.availabilityDateTo || ''} onChange={handleChange}
-                        min={formData.availabilityDateFrom} className={`${inputBaseStyle} ${formErrors.availabilityDateTo ? inputErrorStyle : inputFocusStyle}`} disabled={isSubmitting}/>
-                    {formErrors.availabilityDateTo && <p className="text-red-500 dark:text-red-400 text-xs mt-1 font-normal">{formErrors.availabilityDateTo}</p>}
+                        min={formData.availabilityDateFrom} className={`${inputBaseStyle} ${formErrors.availabilityDateTo ? inputErrorStyle : inputFocusStyle}`} />
+                    {formErrors.availabilityDateTo && <p className="text-red-500 font-sans dark:text-red-400 text-xs mt-1 font-normal">{formErrors.availabilityDateTo}</p>}
                 </div>
             </div>
             <div>
-                <label htmlFor="availabilityTimeDetails" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">รายละเอียดวัน/เวลาที่สะดวกเพิ่มเติม (ถ้ามี)</label>
+                <label htmlFor="availabilityTimeDetails" className="block text-sm font-sans font-medium text-neutral-dark dark:text-dark-text mb-1">รายละเอียดวัน/เวลาที่สะดวกเพิ่มเติม (ถ้ามี)</label>
                 <textarea id="availabilityTimeDetails" name="availabilityTimeDetails" value={formData.availabilityTimeDetails || ''} onChange={handleChange} rows={3}
-                    placeholder="เช่น ทุกวัน จ-ศ หลัง 17:00 น., เสาร์-อาทิตย์ทั้งวัน, เฉพาะช่วงปิดเทอม" disabled={isSubmitting}
+                    placeholder="เช่น ทุกวัน จ-ศ หลัง 17:00 น., เสาร์-อาทิตย์ทั้งวัน, เฉพาะช่วงปิดเทอม"
                     className={`${inputBaseStyle} ${formErrors.availabilityTimeDetails ? inputErrorStyle : inputFocusStyle}`} />
-                {formErrors.availabilityTimeDetails && <p className="text-red-500 dark:text-red-400 text-xs mt-1 font-normal">{formErrors.availabilityTimeDetails}</p>}
+                {formErrors.availabilityTimeDetails && <p className="text-red-500 font-sans dark:text-red-400 text-xs mt-1 font-normal">{formErrors.availabilityTimeDetails}</p>}
             </div>
         </div>
 
          <div className="pt-4 border-t border-neutral-DEFAULT dark:border-dark-border/50 mt-6">
-             <h3 className="text-xl font-semibold text-neutral-dark dark:text-dark-text mb-4">ข้อมูลโปรไฟล์และเกี่ยวกับฉัน</h3>
+             <h3 className="text-xl font-sans font-semibold text-neutral-dark dark:text-dark-text mb-4">ข้อมูลโปรไฟล์และเกี่ยวกับฉัน</h3>
             {baseProfileFields.map(field => (
             <div key={field.name} className="mb-6 last:mb-0">
-                <label htmlFor={field.name} className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">
+                <label htmlFor={field.name} className="block text-sm font-sans font-medium text-neutral-dark dark:text-dark-text mb-1">
                   {field.label} {field.required && <span className="text-red-500 dark:text-red-400">*</span>}
                 </label>
-                <input type={field.type} id={field.name} name={field.name} disabled={isSubmitting}
-                  value={formData[field.name as keyof typeof formData] ?? ''} onChange={handleChange} placeholder={field.placeholder}
-                  className={`${inputBaseStyle} ${formErrors[field.name as keyof FormErrorsType] ? inputErrorStyle : inputFocusStyle}`} />
-                {formErrors[field.name as keyof FormErrorsType] && <p className="text-red-500 dark:text-red-400 text-xs mt-1 font-normal">{formErrors[field.name as keyof FormErrorsType]}</p>}
+                <input
+                  type={field.type}
+                  id={field.name}
+                  name={field.name}
+                  value={formData[field.name as keyof typeof formData] ?? ''} 
+                  onChange={handleChange}
+                  placeholder={field.placeholder}
+                  className={`${inputBaseStyle} ${formErrors[field.name as keyof FormErrorsType] ? inputErrorStyle : inputFocusStyle}`}
+                />
+                {formErrors[field.name as keyof FormErrorsType] && <p className="text-red-500 font-sans dark:text-red-400 text-xs mt-1 font-normal">{formErrors[field.name as keyof FormErrorsType]}</p>}
             </div>
             ))}
             <div>
-            <label htmlFor="details" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">
+            <label htmlFor="details" className="block text-sm font-sans font-medium text-neutral-dark dark:text-dark-text mb-1">
                 รายละเอียดเกี่ยวกับตัวเอง (ทักษะ, ประสบการณ์) <span className="text-red-500 dark:text-red-400">*</span>
             </label>
-            <textarea id="details" name="details" value={formData.details} onChange={handleChange}
-                rows={5} placeholder="เช่น สามารถยกของหนักได้, มีประสบการณ์ดูแลเด็ก 2 ปี, ทำอาหารคลีนได้..." disabled={isSubmitting}
-                className={`${inputBaseStyle} ${formErrors.details ? inputErrorStyle : inputFocusStyle}`} />
-            {formErrors.details && <p className="text-red-500 dark:text-red-400 text-xs mt-1 font-normal">{formErrors.details}</p>}
+            <textarea
+                id="details"
+                name="details"
+                value={formData.details}
+                onChange={handleChange}
+                rows={5}
+                placeholder="เช่น สามารถยกของหนักได้, มีประสบการณ์ดูแลเด็ก 2 ปี, ทำอาหารคลีนได้..."
+                className={`${inputBaseStyle} ${formErrors.details ? inputErrorStyle : inputFocusStyle}`}
+            />
+            {formErrors.details && <p className="text-red-500 font-sans dark:text-red-400 text-xs mt-1 font-normal">{formErrors.details}</p>}
             </div>
         </div>
 
         <div className="flex flex-col sm:flex-row gap-4 pt-4">
-          <Button type="submit" variant="secondary" size="lg" className="w-full sm:w-auto flex-grow" disabled={isSubmitting}>
-            {isSubmitting ? (isEditing ? 'กำลังบันทึก...' : 'กำลังส่ง...') : (isEditing ? '💾 บันทึกการแก้ไข' : 'ส่งโปรไฟล์')}
+          <Button type="submit" variant="secondary" size="lg" className="w-full sm:w-auto flex-grow">
+            {isEditing ? '💾 บันทึกการแก้ไข' : 'ส่งโปรไฟล์'}
           </Button>
-          <Button type="button" onClick={onCancel} variant="outline" colorScheme="secondary" size="lg" className="w-full sm:w-auto flex-grow" disabled={isSubmitting}>
+          <Button type="button" onClick={onCancel} variant="outline" colorScheme="secondary" size="lg" className="w-full sm:w-auto flex-grow">
             ยกเลิก
           </Button>
         </div>

@@ -19,11 +19,18 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({ isOpen, onClose, onC
         <h2 id="confirm-modal-title" className="text-xl font-semibold text-neutral-dark dark:text-dark-text mb-4">{title}</h2>
         <p id="confirm-modal-message" className="text-neutral-dark dark:text-dark-textMuted mb-6 font-normal">{message}</p>
         <div className="flex justify-end gap-3">
-          <Button onClick={onClose} variant="outline" colorScheme="primary" size="md">
+          <Button onClick={onClose} variant="outline" colorScheme="neutral" size="md">
             ยกเลิก
           </Button>
-          <Button onClick={onConfirm} variant="accent" size="md">
-            ยืนยันการลบ
+          <Button 
+            onClick={onConfirm} 
+            size="md"
+            className="bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl shadow-md focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:ring-opacity-50 transition-colors duration-150 ease-in-out"
+          >
+            <span className="flex items-center justify-center gap-1.5">
+              <span>🗑️</span>
+              <span>ยืนยันการลบ</span>
+            </span>
           </Button>
         </div>
       </div>

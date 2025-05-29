@@ -5,11 +5,11 @@ export const AboutUsPage: React.FC = () => {
   return (
     <div className="container mx-auto p-6 sm:p-10 max-w-3xl my-8">
       <div className="bg-white dark:bg-dark-cardBg shadow-xl rounded-xl p-8 md:p-12 border border-neutral-DEFAULT dark:border-dark-border">
-        <h2 className="text-2xl sm:text-3xl font-quicksand font-bold text-primary dark:text-dark-primary-DEFAULT mb-6 text-center whitespace-nowrap">
+        <h2 className="text-2xl sm:text-3xl font-sans font-bold text-neutral-dark dark:text-dark-text mb-6 text-center whitespace-nowrap">
           ✨ เกี่ยวกับหาจ๊อบจ้า ✨
         </h2>
 
-        <div className="space-y-5 text-neutral-dark dark:text-dark-textMuted leading-relaxed font-normal text-base sm:text-lg">
+        <div className="space-y-5 font-serif text-neutral-dark dark:text-dark-textMuted leading-relaxed font-normal text-base sm:text-lg">
           <p>
             หาจ๊อบจ้า คือพื้นที่เล็ก ๆ สำหรับคนที่อยากใช้เวลาและทักษะที่มี ให้เกิดประโยชน์มากขึ้น
           </p>
@@ -24,7 +24,7 @@ export const AboutUsPage: React.FC = () => {
             หลายคนมีทักษะที่โลกออนไลน์ไม่เคยเห็น และงานด่วนที่อาจจะไม่ทันได้ประกาศบนโซเชียลฯ
           </p>
 
-          <h3 className="text-xl sm:text-2xl font-semibold text-secondary-hover dark:text-dark-secondary-hover pt-4">
+          <h3 className="text-xl sm:text-2xl font-sans font-semibold text-neutral-dark dark:text-dark-text pt-4">
             เราสร้างแพลตฟอร์มนี้ขึ้นเพื่อรวบรวม:
           </h3>
           <ul className="list-disc list-inside space-y-2 pl-4">
@@ -39,7 +39,7 @@ export const AboutUsPage: React.FC = () => {
             แค่มีทักษะ ความตั้งใจ และเบอร์ติดต่อ
           </p>
 
-          <p className="text-xl sm:text-2xl font-semibold text-accent dark:text-dark-accent-DEFAULT pt-5 text-center italic">
+          <p className="text-xl sm:text-2xl font-sans font-semibold text-neutral-medium dark:text-dark-textMuted pt-5 text-center italic">
             “เราเชื่อว่าโอกาสใหม่ ๆ มักเริ่มจากสิ่งเล็ก ๆ เสมอ”
           </p>
         </div>

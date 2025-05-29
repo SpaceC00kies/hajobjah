@@ -1,40 +1,10 @@
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
-// import firebase from 'firebase/compat/app'; // Removed unused V8 compat import
-import { auth, db, storage } from "./firebase"; // Existing Firebase setup
-import type { User as FirebaseUser } from 'firebase/auth'; // Firebase Auth User type
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged,
-  updateProfile as updateAuthProfile
-} from 'firebase/auth';
-import {
-  collection,
-  addDoc,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  onSnapshot,
-  orderBy,
-  query,
-  setDoc,
-  updateDoc,
-  where,
-  Timestamp,
-  serverTimestamp,
-  increment,
-  arrayUnion,
-  arrayRemove,
-  writeBatch
-} from 'firebase/firestore';
-import { ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
 
-import type { Job, HelperProfile, User, EnrichedHelperProfile, Interaction } from './types';
+
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import type { Job, HelperProfile, User, EnrichedHelperProfile, Interaction, WebboardPost, WebboardComment, UserLevel, EnrichedWebboardPost, EnrichedWebboardComment } from './types';
 import type { AdminItem as AdminItemType } from './components/AdminDashboard';
-import { View, GenderOption, HelperEducationLevelOption } from './types';
+import { View, GenderOption, HelperEducationLevelOption, USER_LEVELS, UserLevelName, UserRole, ADMIN_BADGE_DETAILS, MODERATOR_BADGE_DETAILS } from './types';
 import { PostJobForm } from './components/PostJobForm';
 import { JobCard } from './components/JobCard';
 import { Button } from './components/Button';
@@ -50,9 +20,80 @@ import { AboutUsPage } from './components/AboutUsPage';
 import { PublicProfilePage } from './components/PublicProfilePage';
 import { SafetyPage } from './components/SafetyPage';
 import { FeedbackForm } from './components/FeedbackForm';
+import { WebboardPage } from './components/WebboardPage';
+import { UserLevelBadge } from './components/UserLevelBadge';
+import { SiteLockOverlay } from './components/SiteLockOverlay'; 
+
+// --- Firebase Integration ---
+// Switch this flag to false to revert to mock/localStorage mode for prototyping
+const USE_FIREBASE = true; 
+
+// Conditional Firebase imports
+let auth: any, db: any, storage: any; // Use 'any' to avoid type errors when USE_FIREBASE is false
+let onAuthStateChanged: any, createUserWithEmailAndPassword: any, signInWithEmailAndPassword: any, signOut: any;
+let collection: any, onSnapshot: any, doc: any, getDoc: any, setDoc: any, addDoc: any, updateDoc: any, deleteDoc: any, serverTimestamp: any, query: any, where: any, orderBy: any, Timestamp: any, getDocs: any, writeBatch: any;
+let ref: any, uploadBytesResumable: any, getDownloadURL: any, deleteObject: any;
+
+
+if (USE_FIREBASE) {
+  import('./firebase').then(firebaseModule => {
+    auth = firebaseModule.auth;
+    db = firebaseModule.db;
+    storage = firebaseModule.storage;
+
+    import('firebase/auth').then(authModule => {
+      onAuthStateChanged = authModule.onAuthStateChanged;
+      createUserWithEmailAndPassword = authModule.createUserWithEmailAndPassword;
+      signInWithEmailAndPassword = authModule.signInWithEmailAndPassword;
+      signOut = authModule.signOut;
+    });
+    import('firebase/firestore').then(firestoreModule => {
+      collection = firestoreModule.collection;
+      onSnapshot = firestoreModule.onSnapshot;
+      doc = firestoreModule.doc;
+      getDoc = firestoreModule.getDoc;
+      setDoc = firestoreModule.setDoc;
+      addDoc = firestoreModule.addDoc;
+      updateDoc = firestoreModule.updateDoc;
+      deleteDoc = firestoreModule.deleteDoc;
+      serverTimestamp = firestoreModule.serverTimestamp;
+      Timestamp = firestoreModule.Timestamp;
+      query = firestoreModule.query;
+      where = firestoreModule.where;
+      orderBy = firestoreModule.orderBy;
+      getDocs = firestoreModule.getDocs; // Added import
+      writeBatch = firestoreModule.writeBatch; // Added import
+    });
+    import('firebase/storage').then(storageModule => {
+      ref = storageModule.ref;
+      uploadBytesResumable = storageModule.uploadBytesResumable;
+      getDownloadURL = storageModule.getDownloadURL;
+      deleteObject = storageModule.deleteObject;
+    });
+  }).catch(err => console.error("Error loading Firebase modules:", err));
+}
+
+// --- End Firebase Integration ---
+
 
 type Theme = 'light' | 'dark';
-const ADMIN_EMAIL_CONFIG = "admin@hajobjah.com"; // For identifying admin role
+const ADMIN_USERNAME = "admin"; // Used for initial admin creation if needed
+const ADMIN_EMAIL = "admin@hajobjah.com"; // Used for initial admin creation
+const ADMIN_PASSWORD = "adminpass"; // Used for initial admin creation
+
+const USER_CLICKED_HELPERS_LS_KEY = 'chiangMaiUserClickedHelpersMap'; // Kept for non-Firebase mode
+const SITE_LOCKED_LS_KEY = 'chiangMaiSiteLockedStatus'; // Kept for non-Firebase mode
+
+
+const THAI_PROFANITY_BLACKLIST: string[] = [
+  "คำหยาบ1", "คำต้องห้าม2", "badword3", "inappropriate_phrase",
+];
+
+export const containsBlacklistedWords = (text: string): boolean => {
+  if (!text || THAI_PROFANITY_BLACKLIST.length === 0) return false;
+  const lowerText = text.toLowerCase();
+  return THAI_PROFANITY_BLACKLIST.some(word => lowerText.includes(word.toLowerCase()));
+};
 
 export const isValidThaiMobileNumberUtil = (mobile: string): boolean => {
   if (!mobile) return false;
@@ -60,11 +101,12 @@ export const isValidThaiMobileNumberUtil = (mobile: string): boolean => {
   return /^0[689]\d{8}$/.test(cleaned);
 };
 
-export const checkProfileCompleteness = (user?: User | null): boolean => {
+export const checkProfileCompleteness = (user: User): boolean => {
   if (!user) return false;
   const hasRequiredContact = !!user.mobile;
-  const hasPhoto = !!user.photoURL;
+  const hasPhoto = !!user.photo;
   const hasAddress = !!user.address && user.address.trim() !== '';
+
   const hasPersonalityInfo = !!(
     user.favoriteMusic?.trim() ||
     user.favoriteBook?.trim() ||
@@ -77,18 +119,44 @@ export const checkProfileCompleteness = (user?: User | null): boolean => {
   return hasRequiredContact && hasPhoto && hasAddress && hasPersonalityInfo;
 };
 
-export const checkHasBeenContacted = (userId: string, allInteractions: Interaction[]): boolean => {
-  if (!userId || !allInteractions) return false;
-  // Check if there's any interaction where this userId was the helper and the type was 'contact_helper'.
-  return allInteractions.some(interaction => interaction.helperUserId === userId && interaction.type === 'contact_helper');
+export const calculateUserLevel = (userId: string, posts: WebboardPost[], comments: WebboardComment[]): UserLevel => {
+  const userPostsCount = posts.filter(p => p.userId === userId).length;
+  const userCommentsCount = comments.filter(c => c.userId === userId).length;
+  const score = (userPostsCount * 2) + (userCommentsCount * 0.5);
+
+  for (let i = USER_LEVELS.length - 1; i >= 0; i--) {
+    if (USER_LEVELS[i].minScore !== undefined && score >= USER_LEVELS[i].minScore!) {
+      return USER_LEVELS[i];
+    }
+  }
+  return USER_LEVELS[0];
 };
+
+export const getUserDisplayBadge = (user: User | null | undefined, posts: WebboardPost[], comments: WebboardComment[]): UserLevel => {
+  if (!user) return USER_LEVELS[0]; 
+  if (user.role === UserRole.Admin) return ADMIN_BADGE_DETAILS;
+  if (user.role === UserRole.Moderator) return MODERATOR_BADGE_DETAILS;
+  return user.userLevel || calculateUserLevel(user.id, posts, comments);
+};
+
+
+const DUMMY_WEBBOARD_POSTS_FOR_SEEDING: Omit<WebboardPost, 'id' | 'createdAt' | 'updatedAt' | 'ownerId'>[] = [
+  {
+    title: "👋 ยินดีต้อนรับสู่เว็บบอร์ดหาจ๊อบจ้า!",
+    body: "สวัสดีครับทุกคน! นี่คือพื้นที่สำหรับพูดคุย แลกเปลี่ยนความคิดเห็น และช่วยเหลือกันในชุมชนหาจ๊อบจ้าของเรานะครับ มีอะไรอยากแชร์ อยากถาม โพสต์ได้เลย! \n\nอย่าลืมอ่านกฎกติกาของบอร์ดเราด้วยนะ 😊",
+    userId: 'ADMIN_UID_PLACEHOLDER', // This should be dynamically replaced by the actual Admin UID during seeding
+    username: 'admin', // Or the admin's chosen display username
+    authorPhoto: undefined,
+    likes: [],
+    isPinned: true,
+  },
+];
 
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>(View.Home);
   const [theme, setTheme] = useState<Theme>('light');
   const [viewingProfileId, setViewingProfileId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
 
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [confirmModalMessage, setConfirmModalMessage] = useState('');
@@ -98,16 +166,337 @@ const App: React.FC = () => {
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const [feedbackSubmissionStatus, setFeedbackSubmissionStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [feedbackSubmissionMessage, setFeedbackSubmissionMessage] = useState<string | null>(null);
-
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  
+  // Firebase-driven states
   const [users, setUsers] = useState<User[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [helperProfiles, setHelperProfiles] = useState<HelperProfile[]>([]);
   const [interactions, setInteractions] = useState<Interaction[]>([]);
+  const [webboardPosts, setWebboardPosts] = useState<WebboardPost[]>([]);
+  const [webboardComments, setWebboardComments] = useState<WebboardComment[]>([]);
+  
+  const [isSiteLocked, setIsSiteLocked] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState(true); 
 
-  const [itemToEdit, setItemToEdit] = useState<Job | HelperProfile | null>(null);
-  const [editingItemType, setEditingItemType] = useState<'job' | 'profile' | null>(null);
+  // Local states
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [loginRedirectInfo, setLoginRedirectInfo] = useState<{ view: View; payload?: any } | null>(null);
+  const [itemToEdit, setItemToEdit] = useState<Job | HelperProfile | WebboardPost | null>(null);
+  const [editingItemType, setEditingItemType] = useState<'job' | 'profile' | 'webboardPost' | null>(null);
   const [sourceViewForForm, setSourceViewForForm] = useState<View | null>(null);
+  const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
+
+
+  // --- START OF MOCK/LOCALSTORAGE DATA AND LOGIC (FOR USE_FIREBASE = false) ---
+  const [mockUsers, setMockUsers] = useState<User[]>([]);
+  const [mockCurrentUser, setMockCurrentUser] = useState<User | null>(null);
+  const [mockJobs, setMockJobs] = useState<Job[]>([]);
+  const [mockHelperProfiles, setMockHelperProfiles] = useState<HelperProfile[]>([]);
+  const [mockInteractions, setMockInteractions] = useState<Interaction[]>([]);
+  const [mockWebboardPosts, setMockWebboardPosts] = useState<WebboardPost[]>([]);
+  const [mockWebboardComments, setMockWebboardComments] = useState<WebboardComment[]>([]);
+  const [mockIsSiteLocked, setMockIsSiteLocked] = useState<boolean>(false);
+
+  const initializeMockData = () => {
+    const savedUsers = localStorage.getItem('chiangMaiQuickUsers');
+    const savedJobs = localStorage.getItem('chiangMaiQuickJobs');
+    const savedHelpers = localStorage.getItem('chiangMaiQuickHelpers');
+    const savedInteractions = localStorage.getItem('chiangMaiQuickInteractions');
+    let savedWebboardPosts = localStorage.getItem('chiangMaiWebboardPosts');
+    const savedWebboardComments = localStorage.getItem('chiangMaiWebboardComments');
+    const savedCurrentUser = localStorage.getItem('chiangMaiQuickCurrentUser');
+    const savedSiteLock = localStorage.getItem(SITE_LOCKED_LS_KEY);
+
+    if (!savedWebboardPosts) {
+        const seededPosts = DUMMY_WEBBOARD_POSTS_FOR_SEEDING.map((p, index) => ({
+            ...p, 
+            id: `dummy-mock-post-${index}`, 
+            ownerId: 'admin-user-001', // Mock admin ID for ownerId
+            userId: 'admin-user-001', // Mock admin ID
+            createdAt: new Date(Date.now() - (index + 1) * 24 * 60 * 60 * 1000).toISOString(), 
+            updatedAt: new Date(Date.now() - (index + 1) * 24 * 60 * 60 * 1000).toISOString()
+        }));
+        localStorage.setItem('chiangMaiWebboardPosts', JSON.stringify(seededPosts));
+        savedWebboardPosts = JSON.stringify(seededPosts);
+    }
+    
+    const tempPosts = savedWebboardPosts ? JSON.parse(savedWebboardPosts) : [];
+    const tempComments = savedWebboardComments ? JSON.parse(savedWebboardComments) : [];
+    
+    const baseAdminUser: User = { 
+      id: 'admin-user-001',
+      displayName: 'Admin User',
+      username: ADMIN_USERNAME,
+      email: ADMIN_EMAIL,
+      hashedPassword: ADMIN_PASSWORD, 
+      role: UserRole.Admin,
+      mobile: '088-888-8888',
+      lineId: 'admin_line_id',
+      facebook: 'admin_facebook_profile',
+      gender: GenderOption.NotSpecified,
+      birthdate: '1990-01-01',
+      educationLevel: HelperEducationLevelOption.Bachelor,
+      photo: undefined,
+      address: '1 Admin Road, Admin City',
+      favoriteMusic: 'Classical',
+      hobbies: 'Reading, Coding',
+      profileComplete: true,
+      userLevel: ADMIN_BADGE_DETAILS,
+      isAdmin: true,
+      isMuted: false,
+      isFrozen: false,
+    };
+    const baseTestUser: User = { 
+      id: 'test-user-002',
+      displayName: 'Test User',
+      username: 'test',
+      email: 'test@user.com',
+      hashedPassword: 'testpass', 
+      role: UserRole.Member,
+      mobile: '081-234-5678',
+      lineId: 'test_user_line',
+      facebook: 'test_user_facebook',
+      gender: GenderOption.Male,
+      birthdate: '1995-05-15',
+      educationLevel: HelperEducationLevelOption.HighSchool,
+      photo: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzdlOGM4YSIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxjaXJjbGUgY3g9IjEyIiBjeT0iOCIgcj0iNSIvPjxwYXRoIGQ9Ik0yMCAyMWE4IDggMCAwIDAtMTYgMCIvPjwvc3ZnPg==',
+      address: '123 Mymoo Road, Chiang Mai',
+      favoriteMovie: 'Inception',
+      introSentence: 'I am a friendly and hardworking individual.',
+      profileComplete: true,
+      userLevel: calculateUserLevel('test-user-002', tempPosts, tempComments),
+      isAdmin: false,
+      isMuted: false,
+      isFrozen: false,
+    };
+    let initialMockUsers = [baseAdminUser, baseTestUser];
+
+    if (savedUsers) {
+        try {
+            const parsedUsers = JSON.parse(savedUsers);
+            if (Array.isArray(parsedUsers) && parsedUsers.length > 0) {
+                initialMockUsers = parsedUsers.map((u: any) => ({
+                    ...u,
+                    userLevel: calculateUserLevel(u.id, tempPosts, tempComments),
+                    profileComplete: checkProfileCompleteness(u),
+                    isAdmin: u.role === UserRole.Admin,
+                    isMuted: u.isMuted || false,
+                    isFrozen: u.isFrozen || false,
+                }));
+            }
+        } catch (e) { console.error("Error parsing mock users", e); }
+    }
+    setMockUsers(initialMockUsers);
+
+    if (savedCurrentUser) {
+        try {
+            const parsedCurrent = JSON.parse(savedCurrentUser);
+            const fullUser = initialMockUsers.find(u => u.id === parsedCurrent.id && u.hashedPassword === parsedCurrent.hashedPassword);
+            if (fullUser) setMockCurrentUser(fullUser);
+        } catch(e) { console.error("Error parsing mock current user", e); }
+    }
+    
+    setMockJobs(savedJobs ? JSON.parse(savedJobs) : []);
+    setMockHelperProfiles(savedHelpers ? JSON.parse(savedHelpers).map((hp: any) => ({...hp, interestedCount: hp.interestedCount || 0})) : []);
+    setMockInteractions(savedInteractions ? JSON.parse(savedInteractions) : []);
+    setMockWebboardPosts(tempPosts);
+    setMockWebboardComments(tempComments);
+    setMockIsSiteLocked(savedSiteLock === 'true');
+    setIsLoading(false);
+  };
+
+  const saveMockData = () => {
+    localStorage.setItem('chiangMaiQuickUsers', JSON.stringify(mockUsers));
+    localStorage.setItem('chiangMaiQuickJobs', JSON.stringify(mockJobs));
+    localStorage.setItem('chiangMaiQuickHelpers', JSON.stringify(mockHelperProfiles));
+    localStorage.setItem('chiangMaiQuickInteractions', JSON.stringify(mockInteractions));
+    localStorage.setItem('chiangMaiQuickWebboardPosts', JSON.stringify(mockWebboardPosts));
+    localStorage.setItem('chiangMaiQuickWebboardComments', JSON.stringify(mockWebboardComments));
+    if (mockCurrentUser) {
+      localStorage.setItem('chiangMaiQuickCurrentUser', JSON.stringify(mockCurrentUser));
+    } else {
+      localStorage.removeItem('chiangMaiQuickCurrentUser');
+    }
+    localStorage.setItem(SITE_LOCKED_LS_KEY, String(mockIsSiteLocked));
+  };
+  // --- END OF MOCK/LOCALSTORAGE DATA AND LOGIC ---
+
+  const dataLoadedRef = useRef(false); // To prevent multiple initial loads
+
+  // --- Firebase Data Listeners ---
+  useEffect(() => {
+    if (!USE_FIREBASE) {
+      initializeMockData();
+      dataLoadedRef.current = true; // Mark mock data as loaded
+      return;
+    }
+    if (!auth || !db || dataLoadedRef.current) { // Added dataLoadedRef check
+      if (!auth || !db) console.log("Firebase services not yet loaded...");
+      if(dataLoadedRef.current && !isLoading) setIsLoading(false); // Ensure loading is false if data already loaded
+      return;
+    }
+    
+    setIsLoading(true);
+    dataLoadedRef.current = true; // Mark Firebase data loading attempt
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser: any) => {
+      if (firebaseUser) {
+        const userDocRef = doc(db, "users", firebaseUser.uid);
+        // Use onSnapshot for real-time updates to currentUser
+        const unsubUserDoc = onSnapshot(userDocRef, (userDocSnap: any) => {
+            if (userDocSnap.exists()) {
+                const userData = userDocSnap.data() as Omit<User, 'id'>;
+                 setCurrentUser({ 
+                    ...userData, 
+                    id: firebaseUser.uid, 
+                    isAdmin: userData.role === UserRole.Admin,
+                    // These are re-calculated client side or should be part of enriched user
+                    profileComplete: checkProfileCompleteness({ ...userData, id: firebaseUser.uid }), 
+                    userLevel: calculateUserLevel(firebaseUser.uid, webboardPosts, webboardComments),
+                    isMuted: userData.isMuted || false,
+                    isFrozen: userData.isFrozen || false,
+                });
+            } else {
+                console.warn("User document not found in Firestore for UID:", firebaseUser.uid);
+                // This could happen if user is deleted from Firestore but not Auth
+                // Or if there's a delay after signup. Consider creating doc if not exists.
+                setCurrentUser(null); 
+            }
+             if (isLoading) setIsLoading(false); // Stop loading after auth and first user doc fetch
+        }, (error: any) => {
+            console.error("Error fetching user document:", error);
+            setCurrentUser(null);
+            if (isLoading) setIsLoading(false);
+        });
+        return () => unsubUserDoc(); // Cleanup listener for user document
+      } else {
+        setCurrentUser(null);
+        if (isLoading) setIsLoading(false); // Stop loading if no user
+      }
+    });
+
+    // Ensure initial admin user exists in Firestore
+    const ensureAdminExists = async () => {
+        const adminUserDocRef = doc(db, "users", 'ADMIN_UID_PLACEHOLDER_STATIC'); // Use a static known UID for the conceptual admin
+        const adminDocSnap = await getDoc(adminUserDocRef);
+        if (!adminDocSnap.exists()) {
+            // This means the actual admin account (from Auth) needs to be created first via app UI
+            // Then its UID used here. For now, this seeding is conceptual.
+            console.log("Conceptual admin user does not exist in Firestore. Manual creation or different seeding needed.");
+        }
+    };
+    // ensureAdminExists(); // Call this if you have a fixed UID for a pre-seeded admin
+
+    const usersCollectionRef = collection(db, "users");
+    const unsubUsers = onSnapshot(usersCollectionRef, (snapshot: any) => {
+        const usersData = snapshot.docs.map((d: any) => {
+            const data = d.data();
+            return { 
+                id: d.id, 
+                ...data,
+                isAdmin: data.role === UserRole.Admin,
+                profileComplete: checkProfileCompleteness({ ...data, id: d.id }),
+                userLevel: calculateUserLevel(d.id, webboardPosts, webboardComments), // Recalculate based on live posts/comments
+                isMuted: data.isMuted || false,
+                isFrozen: data.isFrozen || false,
+            } as User;
+        });
+        setUsers(usersData);
+    }, (error: any) => console.error("Error fetching users collection:", error));
+    
+    const jobsQuery = query(collection(db, "jobs"), orderBy("isPinned", "desc"), orderBy("postedAt", "desc"));
+    const unsubJobs = onSnapshot(jobsQuery, (snapshot: any) => {
+        const jobsData = snapshot.docs.map((d: any) => ({ id: d.id, ...d.data(), postedAt: d.data().postedAt?.toDate ? d.data().postedAt.toDate().toISOString() : d.data().postedAt } as Job));
+        setJobs(jobsData);
+    }, (error: any) => console.error("Error fetching jobs collection:", error));
+
+    const profilesQuery = query(collection(db, "helperProfiles"), orderBy("isPinned", "desc"), orderBy("postedAt", "desc"));
+    const unsubHelperProfiles = onSnapshot(profilesQuery, (snapshot: any) => {
+        const profilesData = snapshot.docs.map((d: any) => ({ id: d.id, ...d.data(), postedAt: d.data().postedAt?.toDate ? d.data().postedAt.toDate().toISOString() : d.data().postedAt } as HelperProfile));
+        setHelperProfiles(profilesData);
+    }, (error: any) => console.error("Error fetching helperProfiles collection:", error));
+
+    const postsQuery = query(collection(db, "webboardPosts"), orderBy("isPinned", "desc"), orderBy("createdAt", "desc"));
+    const unsubWebboardPosts = onSnapshot(postsQuery, (snapshot: any) => {
+        const postsData = snapshot.docs.map((d: any) => ({ id: d.id, ...d.data(), createdAt: d.data().createdAt?.toDate ? d.data().createdAt.toDate().toISOString() : d.data().createdAt, updatedAt: d.data().updatedAt?.toDate ? d.data().updatedAt.toDate().toISOString() : d.data().updatedAt } as WebboardPost));
+        setWebboardPosts(postsData);
+        if (postsData.length === 0 && currentUser?.role === UserRole.Admin) { // Basic seeding logic
+            const adminUid = currentUser.id;
+            DUMMY_WEBBOARD_POSTS_FOR_SEEDING.forEach(async (postSeed) => {
+                const newPost = { ...postSeed, userId: adminUid, ownerId: adminUid, createdAt: serverTimestamp(), updatedAt: serverTimestamp() };
+                try {
+                    await addDoc(collection(db, "webboardPosts"), newPost);
+                } catch (seedError) { console.error("Error seeding webboard post:", seedError); }
+            });
+        }
+    }, (error: any) => console.error("Error fetching webboardPosts collection:", error));
+    
+    const commentsQuery = query(collection(db, "webboardComments"), orderBy("createdAt", "asc"));
+    const unsubWebboardComments = onSnapshot(commentsQuery, (snapshot: any) => {
+        const commentsData = snapshot.docs.map((d: any) => ({ id: d.id, ...d.data(), createdAt: d.data().createdAt?.toDate ? d.data().createdAt.toDate().toISOString() : d.data().createdAt, updatedAt: d.data().updatedAt?.toDate ? d.data().updatedAt.toDate().toISOString() : d.data().updatedAt } as WebboardComment));
+        setWebboardComments(commentsData);
+    }, (error: any) => console.error("Error fetching webboardComments collection:", error));
+    
+    const unsubInteractions = onSnapshot(collection(db, "interactions"), (snapshot: any) => {
+        const interactionsData = snapshot.docs.map((d: any) => ({ id: d.id, ...d.data(), timestamp: d.data().timestamp?.toDate ? d.data().timestamp.toDate().toISOString() : d.data().timestamp } as Interaction));
+        setInteractions(interactionsData);
+    }, (error: any) => console.error("Error fetching interactions collection:", error));
+
+    const configDocRef = doc(db, "config", "siteStatus"); // Changed from siteSettings to siteStatus
+    const unsubSiteConfig = onSnapshot(configDocRef, (docSnap: any) => {
+        if (docSnap.exists()) {
+            setIsSiteLocked(docSnap.data().isSiteLocked || false);
+        } else {
+            // Ensure the doc is created with the correct ID if it doesn't exist
+            setDoc(configDocRef, { isSiteLocked: false, maintenanceMessage: "ระบบอยู่ระหว่างการปรับปรุง" });
+        }
+        if (isLoading) setIsLoading(false); // Should be set earlier by auth
+    }, (error: any) => {
+        console.error("Error fetching site config:", error);
+        if (isLoading) setIsLoading(false);
+    });
+
+    return () => {
+      unsubscribeAuth();
+      unsubUsers();
+      unsubJobs();
+      unsubHelperProfiles();
+      unsubWebboardPosts();
+      unsubWebboardComments();
+      unsubInteractions();
+      unsubSiteConfig();
+      dataLoadedRef.current = false; // Reset for potential re-runs if USE_FIREBASE toggles
+    };
+  }, [USE_FIREBASE, auth, db]); // Re-run if USE_FIREBASE changes or Firebase modules load.
+
+  // Update derived currentUser fields when dependencies change (for Firebase mode)
+   useEffect(() => {
+    if (USE_FIREBASE && currentUser) {
+        const updatedCurrentUser: User = {
+            ...currentUser,
+            profileComplete: checkProfileCompleteness(currentUser),
+            userLevel: calculateUserLevel(currentUser.id, webboardPosts, webboardComments),
+            isMuted: currentUser.isMuted || false,
+            isFrozen: currentUser.isFrozen || false,
+        };
+        if (JSON.stringify(currentUser) !== JSON.stringify(updatedCurrentUser)) {
+            setCurrentUser(updatedCurrentUser);
+        }
+    } else if (!USE_FIREBASE && mockCurrentUser) {
+        const updatedMockCurrentUser: User = {
+            ...mockCurrentUser,
+            profileComplete: checkProfileCompleteness(mockCurrentUser),
+            userLevel: calculateUserLevel(mockCurrentUser.id, mockWebboardPosts, mockWebboardComments),
+            isMuted: mockCurrentUser.isMuted || false,
+            isFrozen: mockCurrentUser.isFrozen || false,
+        };
+         if (JSON.stringify(mockCurrentUser) !== JSON.stringify(updatedMockCurrentUser)) {
+            setMockCurrentUser(updatedMockCurrentUser);
+        }
+    }
+  }, [users, webboardPosts, webboardComments, currentUser?.id, mockUsers, mockWebboardPosts, mockWebboardComments, mockCurrentUser?.id, USE_FIREBASE]);
+
 
   useEffect(() => {
     if (theme === 'dark') {
@@ -120,187 +509,269 @@ const App: React.FC = () => {
   const toggleTheme = () => {
     setTheme(prevTheme => (prevTheme === 'light' ? 'dark' : 'light'));
   };
-
-  useEffect(() => {
-    setIsLoading(true);
-    const authUnsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
-      if (firebaseUser) {
-        const userDocRef = doc(db, "users", firebaseUser.uid);
-        const userDocSnap = await getDoc(userDocRef);
-        if (userDocSnap.exists()) {
-          const userData = userDocSnap.data() as User;
-          const fullUser: User = {
-            ...userData,
-            id: firebaseUser.uid,
-            email: firebaseUser.email || userData.email, // Prefer auth email
-            displayName: firebaseUser.displayName || userData.displayName, // Prefer auth displayName
-            photoURL: firebaseUser.photoURL || userData.photoURL, // Prefer auth photoURL
-            isAdmin: userData.email === ADMIN_EMAIL_CONFIG || userData.isAdmin || false,
-            // Recalculate badges based on potentially other data sources (like interactions)
-            // profileComplete and hasBeenContacted will be updated by their respective effects
-          };
-          setCurrentUser(fullUser);
-        } else {
-          // This case implies an auth user exists but no Firestore record,
-          // which might happen if Firestore doc creation failed during registration.
-          // For now, treat as logged out, or prompt to complete profile.
-           console.warn("User authenticated but no Firestore record found. Logging out.");
-           await signOut(auth);
-           setCurrentUser(null);
-        }
-      } else {
-        setCurrentUser(null);
-      }
-      setIsLoading(false);
-    });
-
-    const usersUnsubscribe = onSnapshot(query(collection(db, "users")), (snapshot) => {
-      const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
-      setUsers(usersData);
-    });
-    
-    const jobsUnsubscribe = onSnapshot(query(collection(db, "jobs"), orderBy("postedAt", "desc")), (snapshot) => {
-      const jobsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Job));
-      setJobs(jobsData);
-    });
-
-    const helpersUnsubscribe = onSnapshot(query(collection(db, "helperProfiles"), orderBy("postedAt", "desc")), (snapshot) => {
-      const helpersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as HelperProfile));
-      setHelperProfiles(helpersData);
-    });
-
-    const interactionsUnsubscribe = onSnapshot(query(collection(db, "interactions"), orderBy("timestamp", "desc")), (snapshot) => {
-      const interactionsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Interaction));
-      setInteractions(interactionsData);
-    });
-
-    return () => {
-      authUnsubscribe();
-      usersUnsubscribe();
-      jobsUnsubscribe();
-      helpersUnsubscribe();
-      interactionsUnsubscribe();
-    };
-  }, []);
-
-  // Effect to update currentUser's badge status when interactions or their own data changes
-  useEffect(() => {
-    if (currentUser && users.length > 0) {
-      const liveCurrentUserData = users.find(u => u.id === currentUser.id);
-      if (liveCurrentUserData) {
-        setCurrentUser(prevUser => ({
-          ...prevUser!,
-          ...liveCurrentUserData, // get latest from users collection
-          profileComplete: checkProfileCompleteness(liveCurrentUserData),
-          hasBeenContacted: checkHasBeenContacted(liveCurrentUserData.id, interactions),
-        }));
-      }
+  
+  const requestLoginForAction = (originalView: View, originalPayload?: any) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    if (!activeCurrentUser) {
+      setLoginRedirectInfo({ view: originalView, payload: originalPayload });
+      setCurrentView(View.Login);
+      setIsMobileMenuOpen(false);
     }
-  }, [currentUser?.id, users, interactions]);
-
+  };
 
   const navigateTo = (view: View, payload?: any) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    setIsMobileMenuOpen(false);
+    window.scrollTo(0, 0);
+
+    const protectedViews: View[] = [
+      View.PostJob,
+      View.OfferHelp,
+      View.UserProfile,
+      View.MyPosts,
+      View.AdminDashboard,
+      View.PublicProfile, 
+    ];
+    
+    if (activeCurrentUser?.isFrozen && view !== View.Login && view !== View.Home && view !== View.Safety && view !== View.AboutUs) {
+        alert("บัญชีของคุณถูกระงับการใช้งาน โปรดติดต่อผู้ดูแลระบบ");
+        handleLogout(); // Log them out
+        return;
+    }
+
+    if (!activeCurrentUser && protectedViews.includes(view)) {
+      setLoginRedirectInfo({ view, payload });
+      setCurrentView(View.Login);
+      return;
+    }
+    
     if (view === View.PublicProfile && typeof payload === 'string') {
       setViewingProfileId(payload);
-    } else {
-      setViewingProfileId(null);
+    } else if (view !== View.PublicProfile) {
+      if (viewingProfileId !== null) setViewingProfileId(null);
+    }
+
+    if (view === View.Webboard) {
+      if (typeof payload === 'string') {
+        if (payload === 'create') {
+          setSelectedPostId('create');
+        } else {
+          setSelectedPostId(payload);
+        }
+      } else if (payload && typeof payload === 'object' && payload.postId) {
+        setSelectedPostId(payload.postId);
+      } else if (payload === null || payload === undefined) {
+        setSelectedPostId(null);
+      }
+    } else if (selectedPostId !== null && view !== View.AdminDashboard) {
+      setSelectedPostId(null);
     }
     setCurrentView(view);
-    window.scrollTo(0, 0);
   };
-  
+
+
   const handleNavigateToPublicProfile = (userId: string) => {
     navigateTo(View.PublicProfile, userId);
   };
 
-  const handleRegister = async (
-    userData: Omit<User, 'id' | 'isAdmin' | 'photoURL' | 'address' | 'createdAt' | 'profileComplete' | 'hasBeenContacted' | 'favoriteMusic' | 'favoriteBook' | 'favoriteMovie' | 'hobbies' | 'favoriteFood' | 'dislikedThing' | 'introSentence'> & { password: string }
-  ): Promise<boolean> => {
-    try {
-      // Check for existing username (optional, but good for uniqueness beyond email)
-      const usernameQuery = query(collection(db, "users"), where("username", "==", userData.username.toLowerCase()));
-      const usernameSnap = await getDocs(usernameQuery);
-      if (!usernameSnap.empty) {
-        alert('ชื่อผู้ใช้นี้ถูกใช้ไปแล้ว โปรดเลือกชื่ออื่น');
-        return false;
-      }
+  const handleRegister = async (userData: Omit<User, 'id' | 'hashedPassword' | 'isAdmin' | 'photo' | 'address' | 'userLevel' | 'profileComplete' | 'role' | 'isMuted' | 'isFrozen'> & { password: string }): Promise<boolean> => {
+    if (USE_FIREBASE) {
+        // Check for existing username or email in Firestore before creating Auth user
+        const usersRef = collection(db, "users");
+        const usernameQuery = query(usersRef, where("username", "==", userData.username.toLowerCase()));
+        const emailQuery = query(usersRef, where("email", "==", userData.email.toLowerCase()));
 
-      const userCredential = await createUserWithEmailAndPassword(auth, userData.email, userData.password);
-      const firebaseUser = userCredential.user;
+        const usernameSnapshot = await getDoc(doc(usersRef, userData.username.toLowerCase())); // Assuming username is doc ID for uniqueness check
+        if (usernameSnapshot.exists()) { // Simplified check, better to query
+             alert('ชื่อผู้ใช้นี้ถูกใช้ไปแล้ว โปรดเลือกชื่ออื่น');
+            return false;
+        }
+        // A more robust check for email would be querying the collection
+        // For now, we rely on Firebase Auth's email uniqueness.
 
-      await updateAuthProfile(firebaseUser, { displayName: userData.displayName });
-      
-      const newUserDoc: Omit<User, 'id' | 'profileComplete' | 'hasBeenContacted'> = {
-        displayName: userData.displayName,
-        username: userData.username.toLowerCase(),
-        email: firebaseUser.email!,
-        isAdmin: firebaseUser.email === ADMIN_EMAIL_CONFIG, // Basic admin check
-        mobile: userData.mobile,
-        lineId: userData.lineId || '',
-        facebook: userData.facebook || '',
-        gender: userData.gender,
-        birthdate: userData.birthdate,
-        educationLevel: userData.educationLevel,
-        photoURL: firebaseUser.photoURL || '', // Initially empty or default from auth
-        address: '',
-        // Personality fields empty initially
-        favoriteMusic: '', favoriteBook: '', favoriteMovie: '', hobbies: '', favoriteFood: '', dislikedThing: '', introSentence: '',
-        createdAt: serverTimestamp() as Timestamp,
-      };
+        if (!isValidThaiMobileNumberUtil(userData.mobile)) {
+            alert('รูปแบบเบอร์โทรศัพท์ไม่ถูกต้อง');
+            return false;
+        }
+        if (!userData.gender || !userData.birthdate || !userData.educationLevel) {
+            alert('กรุณากรอกข้อมูลส่วนตัว (เพศ, วันเกิด, ระดับการศึกษา) ให้ครบถ้วน');
+            return false;
+        }
+        try {
+            const userCredential = await createUserWithEmailAndPassword(auth, userData.email, userData.password);
+            const firebaseUser = userCredential.user;
+            
+            const newUserRole = (userData.username.toLowerCase() === ADMIN_USERNAME || userData.email.toLowerCase() === ADMIN_EMAIL) && userData.password === ADMIN_PASSWORD ? UserRole.Admin : UserRole.Member;
 
-      await setDoc(doc(db, "users", firebaseUser.uid), newUserDoc);
-      // setCurrentUser will be set by onAuthStateChanged listener picking up the new user data from Firestore.
-      alert('ลงทะเบียนสำเร็จแล้ว!');
-      navigateTo(View.Home);
-      return true;
-    } catch (error: any) {
-      console.error("Registration error:", error);
-      if (error.code === 'auth/email-already-in-use') {
-        alert('อีเมลนี้ถูกใช้ไปแล้ว โปรดใช้อีเมลอื่น');
-      } else {
-        alert(`เกิดข้อผิดพลาดในการลงทะเบียน: ${error.message}`);
-      }
-      return false;
+            const newUserProfileData: Omit<User, 'id' | 'hashedPassword' | 'isAdmin' | 'profileComplete' | 'userLevel'> = {
+                displayName: userData.displayName,
+                username: userData.username, // Store as provided, maybe convert to lower for queries
+                email: firebaseUser.email!,
+                role: newUserRole,
+                mobile: userData.mobile,
+                lineId: userData.lineId || '',
+                facebook: userData.facebook || '',
+                gender: userData.gender || GenderOption.NotSpecified,
+                birthdate: userData.birthdate || '',
+                educationLevel: userData.educationLevel || HelperEducationLevelOption.NotStated,
+                photo: '', 
+                address: '',
+                favoriteMusic: '', favoriteBook: '', favoriteMovie: '', hobbies: '', favoriteFood: '', dislikedThing: '', introSentence: '',
+                isMuted: false, 
+                isFrozen: false, 
+            };
+            
+            await setDoc(doc(db, "users", firebaseUser.uid), newUserProfileData);
+            alert('ลงทะเบียนสำเร็จแล้ว!');
+             if (loginRedirectInfo) {
+                navigateTo(loginRedirectInfo.view, loginRedirectInfo.payload);
+                setLoginRedirectInfo(null);
+            } else {
+                navigateTo(View.Home);
+            }
+            return true;
+        } catch (error: any) {
+            console.error("Firebase registration error:", error);
+            if (error.code === 'auth/email-already-in-use') {
+                alert('อีเมลนี้ถูกใช้ไปแล้ว โปรดใช้อีเมลอื่น');
+            } else {
+                alert(`เกิดข้อผิดพลาดในการลงทะเบียน: ${error.message}`);
+            }
+            return false;
+        }
+    } else { // Mock logic
+        if (mockUsers.find(u => u.username.toLowerCase() === userData.username.toLowerCase())) {
+            alert('ชื่อผู้ใช้นี้ถูกใช้ไปแล้ว โปรดเลือกชื่ออื่น');
+            return false;
+        }
+        if (mockUsers.find(u => u.email.toLowerCase() === userData.email.toLowerCase())) {
+            alert('อีเมลนี้ถูกใช้ไปแล้ว โปรดใช้อีเมลอื่น');
+            return false;
+        }
+        if (!isValidThaiMobileNumberUtil(userData.mobile)) {
+            alert('รูปแบบเบอร์โทรศัพท์ไม่ถูกต้อง');
+            return false;
+        }
+        if (!userData.gender || !userData.birthdate || !userData.educationLevel) {
+            alert('กรุณากรอกข้อมูลส่วนตัว (เพศ, วันเกิด, ระดับการศึกษา) ให้ครบถ้วน');
+            return false;
+        }
+
+        const newUserId = Date.now().toString();
+        const newUserRole = (userData.username.toLowerCase() === ADMIN_USERNAME || userData.email.toLowerCase() === ADMIN_EMAIL) && userData.password === ADMIN_PASSWORD ? UserRole.Admin : UserRole.Member;
+        
+        const newUserBase: Omit<User, 'profileComplete' | 'userLevel' | 'isAdmin' | 'isMuted' | 'isFrozen'> = { 
+            id: newUserId,
+            displayName: userData.displayName,
+            username: userData.username,
+            email: userData.email,
+            hashedPassword: userData.password,
+            role: newUserRole,
+            mobile: userData.mobile,
+            lineId: userData.lineId || undefined,
+            facebook: userData.facebook || undefined,
+            gender: userData.gender,
+            birthdate: userData.birthdate,
+            educationLevel: userData.educationLevel,
+        };
+        const newUser: User = {
+            ...newUserBase,
+            isAdmin: newUserRole === UserRole.Admin,
+            userLevel: calculateUserLevel(newUserId, mockWebboardPosts, mockWebboardComments),
+            profileComplete: checkProfileCompleteness(newUserBase as User),
+            isMuted: false,
+            isFrozen: false,
+        };
+
+        setMockUsers(prev => [...prev, newUser]);
+        setMockCurrentUser(newUser); 
+        alert('ลงทะเบียนสำเร็จแล้ว!');
+
+        if (loginRedirectInfo) {
+            navigateTo(loginRedirectInfo.view, loginRedirectInfo.payload);
+            setLoginRedirectInfo(null);
+        } else {
+            navigateTo(View.Home);
+        }
+        return true;
     }
   };
 
   const handleLogin = async (loginIdentifier: string, passwordAttempt: string): Promise<boolean> => {
-    try {
-      // Try login with email first
-      await signInWithEmailAndPassword(auth, loginIdentifier, passwordAttempt);
-      // onAuthStateChanged will handle setting currentUser
-      alert(`ยินดีต้อนรับ!`); // DisplayName will be updated by listener
-      navigateTo(View.Home);
-      return true;
-    } catch (error: any) {
-      // If email login fails, try to find user by username then attempt login with their email
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-email' || error.code === 'auth/wrong-password') {
-        const usernameQuery = query(collection(db, "users"), where("username", "==", loginIdentifier.toLowerCase()));
-        const usernameSnap = await getDocs(usernameQuery);
-        if (!usernameSnap.empty) {
-          const foundUser = usernameSnap.docs[0].data() as User;
-          try {
-            await signInWithEmailAndPassword(auth, foundUser.email, passwordAttempt);
-            alert(`ยินดีต้อนรับ!`);
-            navigateTo(View.Home);
+    if (USE_FIREBASE) {
+        try {
+            // Attempt login with email. If it fails with 'auth/invalid-email', try finding user by username then login with their email.
+            let userEmail = loginIdentifier;
+            if (!loginIdentifier.includes('@')) { // Likely a username
+                const usersRef = collection(db, "users");
+                const q = query(usersRef, where("username", "==", loginIdentifier));
+                const querySnapshot = await getDocs(q); 
+                if (!querySnapshot.empty) {
+                     userEmail = querySnapshot.docs[0].data().email;
+                } else {
+                    alert('ชื่อผู้ใช้/อีเมล หรือรหัสผ่านไม่ถูกต้อง');
+                    return false;
+                }
+            }
+
+            const userCredential = await signInWithEmailAndPassword(auth, userEmail, passwordAttempt);
+            const firebaseUser = userCredential.user;
+            const userDocSnap = await getDoc(doc(db, "users", firebaseUser.uid));
+
+            if (userDocSnap.exists() && userDocSnap.data().isFrozen) {
+                await signOut(auth); // Sign out the frozen user
+                alert("บัญชีของคุณถูกระงับการใช้งาน โปรดติดต่อผู้ดูแลระบบ");
+                return false;
+            }
+
+            alert(`ยินดีต้อนรับ!`); 
+             if (loginRedirectInfo) {
+                navigateTo(loginRedirectInfo.view, loginRedirectInfo.payload);
+                setLoginRedirectInfo(null);
+            } else {
+                navigateTo(View.Home);
+            }
             return true;
-          } catch (usernameLoginError: any) {
+        } catch (error: any) {
+            console.error("Firebase login error:", error);
             alert('ชื่อผู้ใช้/อีเมล หรือรหัสผ่านไม่ถูกต้อง');
-            console.error("Login error (after username lookup):", usernameLoginError);
             return false;
-          }
         }
-      }
-      alert('ชื่อผู้ใช้/อีเมล หรือรหัสผ่านไม่ถูกต้อง');
-      console.error("Login error:", error);
-      return false;
+    } else { // Mock logic
+        const userFromList = mockUsers.find(
+        u => (u.username.toLowerCase() === loginIdentifier.toLowerCase() || u.email.toLowerCase() === loginIdentifier.toLowerCase()) &&
+            u.hashedPassword === passwordAttempt
+        );
+        if (userFromList) {
+            if (userFromList.isFrozen) {
+                alert("บัญชีของคุณถูกระงับการใช้งาน โปรดติดต่อผู้ดูแลระบบ");
+                return false;
+            }
+        const loggedInUser: User = {
+            ...userFromList,
+            isAdmin: userFromList.role === UserRole.Admin,
+            };
+        setMockCurrentUser(loggedInUser);
+        alert(`ยินดีต้อนรับ @${loggedInUser.displayName}!`);
+        if (loginRedirectInfo) {
+            navigateTo(loginRedirectInfo.view, loginRedirectInfo.payload);
+            setLoginRedirectInfo(null);
+        } else {
+            navigateTo(View.Home);
+        }
+        return true;
+        } else {
+        alert('ชื่อผู้ใช้/อีเมล หรือรหัสผ่านไม่ถูกต้อง');
+        return false;
+        }
     }
   };
 
   const handleUpdateUserProfile = async (
-    updatedProfileData: Pick<User, 'mobile' | 'lineId' | 'facebook' | 'gender' | 'birthdate' | 'educationLevel' | 'photoURL' | 'address' | 'favoriteMusic' | 'favoriteBook' | 'favoriteMovie' | 'hobbies' | 'favoriteFood' | 'dislikedThing' | 'introSentence'> & {newPhotoFile?: File}
+    updatedProfileData: Pick<User, 'mobile' | 'lineId' | 'facebook' | 'gender' | 'birthdate' | 'educationLevel' | 'photo' | 'address' | 'favoriteMusic' | 'favoriteBook' | 'favoriteMovie' | 'hobbies' | 'favoriteFood' | 'dislikedThing' | 'introSentence'> & { photoFile?: File }
   ): Promise<boolean> => {
-    if (!currentUser || !auth.currentUser) {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    if (!activeCurrentUser) {
       alert('เกิดข้อผิดพลาด: ไม่พบข้อมูลผู้ใช้ปัจจุบัน');
       return false;
     }
@@ -308,7 +779,7 @@ const App: React.FC = () => {
       alert('รูปแบบเบอร์โทรศัพท์ไม่ถูกต้อง (เช่น 08X-XXX-XXXX)');
       return false;
     }
-     if (!updatedProfileData.gender || updatedProfileData.gender === GenderOption.NotSpecified) {
+    if (!updatedProfileData.gender || updatedProfileData.gender === GenderOption.NotSpecified) {
       alert('กรุณาเลือกเพศ');
       return false;
     }
@@ -321,754 +792,1126 @@ const App: React.FC = () => {
       return false;
     }
 
-    try {
-      const userDocRef = doc(db, "users", currentUser.id);
-      let finalPhotoURL = currentUser.photoURL || '';
+    if (USE_FIREBASE) {
+        try {
+            const userDocRef = doc(db, "users", activeCurrentUser.id);
+            let photoURL = updatedProfileData.photo || activeCurrentUser.photo || ''; // Keep current photo if not changed
 
-      if (updatedProfileData.newPhotoFile) {
-        const photoFile = updatedProfileData.newPhotoFile;
-        const storageRef = ref(storage, `profilePictures/${currentUser.id}/${photoFile.name}`);
-        
-        // Convert File to base64 string for uploadString
-        const reader = new FileReader();
-        await new Promise<void>((resolve, reject) => {
-            reader.onload = async (event) => {
-                try {
-                    const base64String = event.target?.result as string;
-                    await uploadString(storageRef, base64String, 'data_url');
-                    finalPhotoURL = await getDownloadURL(storageRef);
-                    resolve();
-                } catch (e) {
-                    reject(e);
+            if (updatedProfileData.photoFile) { // New file uploaded
+                const photoName = `profileImages/${activeCurrentUser.id}/${Date.now()}_${updatedProfileData.photoFile.name}`;
+                const storageRef = ref(storage, photoName);
+                const uploadTask = uploadBytesResumable(storageRef, updatedProfileData.photoFile);
+                
+                await new Promise<void>((resolve, reject) => {
+                    uploadTask.on('state_changed', 
+                        (snapshot) => { /* Progress */ }, 
+                        (error) => { console.error("Upload failed:", error); reject(error); }, 
+                        async () => {
+                            photoURL = await getDownloadURL(uploadTask.snapshot.ref);
+                            // Delete old photo from storage if it exists and is different
+                            if (activeCurrentUser.photo && activeCurrentUser.photo !== photoURL && activeCurrentUser.photo.includes('firebasestorage')) {
+                                try { await deleteObject(ref(storage, activeCurrentUser.photo)); } catch (e) { console.warn("Old photo deletion failed", e); }
+                            }
+                            resolve();
+                        }
+                    );
+                });
+            } else if (updatedProfileData.photo === undefined && activeCurrentUser.photo) { // Photo explicitly removed by user
+                photoURL = '';
+                if (activeCurrentUser.photo && activeCurrentUser.photo.includes('firebasestorage')) {
+                   try { await deleteObject(ref(storage, activeCurrentUser.photo)); } catch (e) { console.warn("Photo deletion failed", e); }
                 }
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(photoFile);
-        });
+            }
+            // If updatedProfileData.photo is a string (Base64 from previous mock or already a URL), it's handled by initial photoURL assignment
+            
+            const dataToUpdate = { ...updatedProfileData, photo: photoURL };
+            delete (dataToUpdate as any).photoFile;
 
-        await updateAuthProfile(auth.currentUser, { photoURL: finalPhotoURL });
-      }
-      
-      const { newPhotoFile, ...firestoreData } = updatedProfileData;
-
-      await updateDoc(userDocRef, {
-        ...firestoreData,
-        photoURL: finalPhotoURL, // Ensure photoURL from User type is used
-        displayName: currentUser.displayName, // Assuming display name doesn't change here, or get from auth
-      });
-      // The onSnapshot listener for 'users' will update the local `users` state,
-      // and the effect for `currentUser` will pick up these changes.
-      return true;
-    } catch (error) {
-      console.error("Error updating profile:", error);
-      alert("เกิดข้อผิดพลาดในการอัปเดตโปรไฟล์: " + (error as Error).message);
-      return false;
+            await updateDoc(userDocRef, dataToUpdate);
+            return true;
+        } catch (error) {
+            console.error("Error updating user profile in Firebase:", error);
+            alert("เกิดข้อผิดพลาดในการอัปเดตโปรไฟล์");
+            return false;
+        }
+    } else { // Mock logic
+        setMockCurrentUser(prev => prev ? { ...prev, ...updatedProfileData, photo: updatedProfileData.photoFile ? 'new-base64-placeholder' : updatedProfileData.photo } : null )
+        setMockUsers(prevUsers =>
+        prevUsers.map(u =>
+            u.id === activeCurrentUser.id
+            ? {
+                ...u,
+                ...updatedProfileData, 
+                photo: updatedProfileData.photoFile ? 'new-base64-placeholder' : updatedProfileData.photo, // In mock, would be base64
+                profileComplete: checkProfileCompleteness({ ...u, ...updatedProfileData, photo: updatedProfileData.photoFile ? 'new-base64-placeholder' : updatedProfileData.photo }),
+                }
+            : u
+        )
+        );
+        return true;
     }
   };
-
 
   const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      // setCurrentUser will be set to null by onAuthStateChanged
-      setItemToEdit(null);
-      setEditingItemType(null);
-      setSourceViewForForm(null);
-      setViewingProfileId(null);
-      alert('ออกจากระบบเรียบร้อยแล้ว');
-      navigateTo(View.Home);
-    } catch (error) {
-      console.error("Logout error:", error);
-      alert('เกิดข้อผิดพลาดในการออกจากระบบ');
+    if (USE_FIREBASE) {
+        try {
+            await signOut(auth);
+        } catch (error) {
+            console.error("Firebase logout error:", error);
+            alert("เกิดข้อผิดพลาดในการออกจากระบบ");
+        }
+    } else {
+        setMockCurrentUser(null);
     }
+    setLoginRedirectInfo(null); 
+    setItemToEdit(null);
+    setEditingItemType(null);
+    setSourceViewForForm(null);
+    setViewingProfileId(null);
+    setSelectedPostId(null);
+    setIsMobileMenuOpen(false);
+    alert('ออกจากระบบเรียบร้อยแล้ว');
+    navigateTo(View.Home);
   };
-
+  
   const handleStartEditItemFromAdmin = (item: AdminItemType) => {
-    const originalItem = item.itemType === 'job'
-      ? jobs.find(j => j.id === item.id)
-      : helperProfiles.find(p => p.id === item.id);
+    const activeJobs = USE_FIREBASE ? jobs : mockJobs;
+    const activeHelperProfiles = USE_FIREBASE ? helperProfiles : mockHelperProfiles;
+    const activeWebboardPosts = USE_FIREBASE ? webboardPosts : mockWebboardPosts;
 
-    if (originalItem) {
-      setItemToEdit(originalItem);
-      setEditingItemType(item.itemType);
-      setSourceViewForForm(View.AdminDashboard);
-      navigateTo(item.itemType === 'job' ? View.PostJob : View.OfferHelp);
-    } else {
-      alert("เกิดข้อผิดพลาด: ไม่พบรายการที่ต้องการแก้ไข");
+    if (item.itemType === 'job') {
+        const originalItem = activeJobs.find(j => j.id === item.id);
+        if (originalItem) {
+            setItemToEdit(originalItem);
+            setEditingItemType('job');
+            setSourceViewForForm(View.AdminDashboard);
+            navigateTo(View.PostJob);
+        } else { console.error("Job not found for editing from Admin:", item); }
+    } else if (item.itemType === 'profile') {
+        const originalItem = activeHelperProfiles.find(p => p.id === item.id);
+        if (originalItem) {
+            setItemToEdit(originalItem);
+            setEditingItemType('profile');
+            setSourceViewForForm(View.AdminDashboard);
+            navigateTo(View.OfferHelp);
+        } else { console.error("Helper profile not found for editing from Admin:", item); }
+    } else if (item.itemType === 'webboardPost') {
+        const originalPost = activeWebboardPosts.find(p => p.id === item.id);
+        if (originalPost) {
+            setItemToEdit({ ...originalPost, isEditing: true });
+            setEditingItemType('webboardPost');
+            setSourceViewForForm(View.AdminDashboard);
+            navigateTo(View.Webboard, 'create');
+        } else { console.error("Webboard post not found for editing from Admin:", item); }
     }
   };
 
-  const handleStartEditMyItem = (itemId: string, itemType: 'job' | 'profile') => {
-    const originalItem = itemType === 'job'
-        ? jobs.find(j => j.id === itemId)
-        : helperProfiles.find(p => p.id === itemId);
+  const handleStartEditMyItem = (itemId: string, itemType: 'job' | 'profile' | 'webboardPost') => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    const activeJobs = USE_FIREBASE ? jobs : mockJobs;
+    const activeHelperProfiles = USE_FIREBASE ? helperProfiles : mockHelperProfiles;
+    const activeWebboardPosts = USE_FIREBASE ? webboardPosts : mockWebboardPosts;
 
-    if (originalItem && originalItem.userId === currentUser?.id) {
-        setItemToEdit(originalItem);
-        setEditingItemType(itemType);
-        setSourceViewForForm(View.MyPosts);
-        navigateTo(itemType === 'job' ? View.PostJob : View.OfferHelp);
-    } else {
-        alert("เกิดข้อผิดพลาด: ไม่พบรายการที่ต้องการแก้ไข หรือคุณไม่ใช่เจ้าของโพสต์นี้");
+    if (itemType === 'job') {
+        const originalItem = activeJobs.find(j => j.id === itemId);
+        if (originalItem && originalItem.userId === activeCurrentUser?.id) {
+            setItemToEdit(originalItem);
+            setEditingItemType(itemType);
+            setSourceViewForForm(View.MyPosts);
+            navigateTo(View.PostJob);
+        } else { 
+            alert("เกิดข้อผิดพลาด: ไม่พบรายการ หรือคุณไม่ใช่เจ้าของ"); 
+        }
+    } else if (itemType === 'profile') {
+        const originalItem = activeHelperProfiles.find(p => p.id === itemId);
+        if (originalItem && originalItem.userId === activeCurrentUser?.id) {
+            setItemToEdit(originalItem);
+            setEditingItemType(itemType);
+            setSourceViewForForm(View.MyPosts);
+            navigateTo(View.OfferHelp);
+        } else { 
+            alert("เกิดข้อผิดพลาด: ไม่พบรายการ หรือคุณไม่ใช่เจ้าของ"); 
+        }
+    } else if (itemType === 'webboardPost') {
+        const originalPost = activeWebboardPosts.find(p => p.id === itemId);
+        if (originalPost && originalPost.userId === activeCurrentUser?.id) {
+            setItemToEdit({ ...originalPost, isEditing: true });
+            setEditingItemType('webboardPost');
+            setSourceViewForForm(View.MyPosts);
+            navigateTo(View.Webboard, 'create');
+        } else { 
+            alert("เกิดข้อผิดพลาด: ไม่พบรายการ หรือคุณไม่ใช่เจ้าของ"); 
+        }
     }
   };
 
-  type JobFormData = Omit<Job, 'id' | 'postedAt' | 'userId' | 'username' | 'contact' | 'isSuspicious' | 'isPinned' | 'isHired'>;
-  type HelperProfileFormData = Omit<HelperProfile, 'id' | 'postedAt' | 'userId' | 'username' | 'contact' | 'gender' | 'birthdate' | 'educationLevel' | 'isSuspicious' | 'isPinned' | 'isUnavailable' | 'adminVerifiedExperience' | 'interestedCount' | 'interestedUserIds'>;
+  type JobFormData = Omit<Job, 'id' | 'postedAt' | 'userId' | 'username' | 'isSuspicious' | 'isPinned' | 'isHired' | 'contact' | 'ownerId'>;
+  type HelperProfileFormData = Omit<HelperProfile, 'id' | 'postedAt' | 'userId' | 'username' | 'isSuspicious' | 'isPinned' | 'isUnavailable' | 'contact' | 'gender' | 'birthdate' | 'educationLevel' | 'adminVerifiedExperience' | 'interestedCount' | 'ownerId'>;
 
   const generateContactString = (user: User): string => {
     let contactParts: string[] = [];
     if (user.mobile) contactParts.push(`เบอร์โทร: ${user.mobile}`);
     if (user.lineId) contactParts.push(`LINE ID: ${user.lineId}`);
     if (user.facebook) contactParts.push(`Facebook: ${user.facebook}`);
-    return contactParts.join('\n') || 'ไม่ระบุช่องทางติดต่อ (โปรดอัปเดตโปรไฟล์)';
-  };
-  
-  const handleSubmitJobForm = async (formDataFromForm: JobFormData & { id?: string }) => {
-    if (!currentUser) {
-      alert("คุณต้องเข้าสู่ระบบก่อน");
-      navigateTo(View.Login);
-      return;
-    }
-    const contactInfo = generateContactString(currentUser);
-
-    if (formDataFromForm.id && itemToEdit && editingItemType === 'job') { // Editing existing job
-      const jobDocRef = doc(db, "jobs", formDataFromForm.id);
-      const jobToUpdate = { ...formDataFromForm, contact: contactInfo, userId: currentUser.id, username: currentUser.username };
-      delete jobToUpdate.id; // Don't store 'id' field in Firestore document
-      try {
-        await updateDoc(jobDocRef, jobToUpdate);
-        alert('แก้ไขประกาศงานเรียบร้อยแล้ว');
-      } catch (error) {
-        console.error("Error updating job: ", error);
-        alert("เกิดข้อผิดพลาดในการแก้ไขประกาศงาน");
-      }
-    } else { // Adding new job
-      const newJobData = {
-        ...formDataFromForm,
-        contact: contactInfo,
-        userId: currentUser.id,
-        username: currentUser.username,
-        postedAt: serverTimestamp() as Timestamp,
-        isSuspicious: false,
-        isPinned: false,
-        isHired: false,
-      };
-      try {
-        await addDoc(collection(db, "jobs"), newJobData);
-        alert('ประกาศงานของคุณถูกเพิ่มเรียบร้อยแล้ว!');
-      } catch (error) {
-        console.error("Error adding job: ", error);
-        alert("เกิดข้อผิดพลาดในการเพิ่มประกาศงาน");
-      }
-    }
-    setItemToEdit(null);
-    setEditingItemType(null);
-    navigateTo(sourceViewForForm || View.FindJobs);
-    setSourceViewForForm(null);
+    return contactParts.join('\n') || 'ไม่ระบุช่องทางติดต่อ';
   };
 
-  const handleSubmitHelperProfileForm = async (formDataFromForm: HelperProfileFormData & { id?: string }) => {
-     if (!currentUser) {
-      alert("คุณต้องเข้าสู่ระบบก่อน");
-      navigateTo(View.Login);
-      return;
-    }
-     if (!currentUser.gender || !currentUser.birthdate || !currentUser.educationLevel ||
-        currentUser.gender === GenderOption.NotSpecified || currentUser.educationLevel === HelperEducationLevelOption.NotStated) {
-        alert('กรุณาอัปเดตข้อมูลส่วนตัว (เพศ, วันเกิด, ระดับการศึกษา) ในหน้าโปรไฟล์ของคุณก่อนสร้างโปรไฟล์ผู้ช่วย');
-        navigateTo(View.UserProfile);
-        return;
-    }
-    const contactInfo = generateContactString(currentUser);
+  // --- Firestore Update/Add Functions ---
+  const handleUpdateJob = async (updatedJobDataFromForm: JobFormData & { id: string }) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    const activeJobs = USE_FIREBASE ? jobs : mockJobs;
 
-    if (formDataFromForm.id && itemToEdit && editingItemType === 'profile') { // Editing
-      const profileDocRef = doc(db, "helperProfiles", formDataFromForm.id);
-      const profileToUpdate = {
-        ...formDataFromForm,
-        contact: contactInfo,
-        userId: currentUser.id,
-        username: currentUser.username,
-        gender: currentUser.gender,
-        birthdate: currentUser.birthdate,
-        educationLevel: currentUser.educationLevel,
-      };
-      delete profileToUpdate.id;
-      try {
-        await updateDoc(profileDocRef, profileToUpdate);
-        alert('แก้ไขโปรไฟล์ผู้ช่วยเรียบร้อยแล้ว');
-      } catch (error) {
-        console.error("Error updating helper profile: ", error);
-        alert("เกิดข้อผิดพลาดในการแก้ไขโปรไฟล์ผู้ช่วย");
-      }
-    } else { // Adding new
-      const newProfileData = {
-        ...formDataFromForm,
-        contact: contactInfo,
-        userId: currentUser.id,
-        username: currentUser.username,
-        gender: currentUser.gender,
-        birthdate: currentUser.birthdate,
-        educationLevel: currentUser.educationLevel,
-        postedAt: serverTimestamp() as Timestamp,
-        isSuspicious: false,
-        isPinned: false,
-        isUnavailable: false,
-        adminVerifiedExperience: false,
-        interestedCount: 0,
-        interestedUserIds: [],
-      };
-      try {
-        await addDoc(collection(db, "helperProfiles"), newProfileData);
-        alert('โปรไฟล์ของคุณถูกเพิ่มเรียบร้อยแล้ว!');
-      } catch (error) {
-        console.error("Error adding helper profile: ", error);
-        alert("เกิดข้อผิดพลาดในการเพิ่มโปรไฟล์ผู้ช่วย");
-      }
+    const originalJob = activeJobs.find(j => j.id === updatedJobDataFromForm.id);
+    if (!originalJob) {
+      alert('เกิดข้อผิดพลาด: ไม่พบประกาศงานเดิม'); return;
     }
-    setItemToEdit(null);
-    setEditingItemType(null);
-    navigateTo(sourceViewForForm || View.FindHelpers);
-    setSourceViewForForm(null);
+    // Ownership check will be handled by Firestore rules based on ownerId
+    // if (originalJob.userId !== activeCurrentUser?.id && activeCurrentUser?.role !== UserRole.Admin) {
+    //     alert('คุณไม่มีสิทธิ์แก้ไขประกาศงานนี้'); return;
+    // }
+    if (containsBlacklistedWords(updatedJobDataFromForm.description) || containsBlacklistedWords(updatedJobDataFromForm.title)) {
+        alert('เนื้อหาหรือหัวข้อมีคำที่ไม่เหมาะสม โปรดแก้ไข'); return;
+    }
+    
+    const contactInfo = activeCurrentUser ? generateContactString(activeCurrentUser) : 'ข้อมูลติดต่อไม่พร้อมใช้งาน';
+    const dataToUpdate: Partial<Job> = {
+      ...updatedJobDataFromForm,
+      contact: contactInfo, // Ensure contact is updated if user details changed
+    };
+
+    if (USE_FIREBASE) {
+        const jobDocRef = doc(db, "jobs", updatedJobDataFromForm.id);
+        await updateDoc(jobDocRef, dataToUpdate);
+    } else {
+        setMockJobs(prevJobs => prevJobs.map(j => (j.id === updatedJobDataFromForm.id ? { ...originalJob, ...dataToUpdate } as Job : j)));
+    }
+    setItemToEdit(null); setEditingItemType(null);
+    navigateTo(sourceViewForForm || View.Home); setSourceViewForForm(null);
+    alert('แก้ไขประกาศงานเรียบร้อยแล้ว');
   };
-  
+
+  const handleUpdateHelperProfile = async (updatedProfileDataFromForm: HelperProfileFormData & { id: string }) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    const activeHelperProfiles = USE_FIREBASE ? helperProfiles : mockHelperProfiles;
+
+    const originalProfile = activeHelperProfiles.find(p => p.id === updatedProfileDataFromForm.id);
+    if (!originalProfile) {
+      alert('เกิดข้อผิดพลาด: ไม่พบโปรไฟล์เดิม'); return;
+    }
+    // Ownership check by Firestore rules
+    // if (originalProfile.userId !== activeCurrentUser?.id && activeCurrentUser?.role !== UserRole.Admin) {
+    //     alert('คุณไม่มีสิทธิ์แก้ไขโปรไฟล์นี้'); return;
+    // }
+     if (containsBlacklistedWords(updatedProfileDataFromForm.details) || containsBlacklistedWords(updatedProfileDataFromForm.profileTitle)) {
+        alert('เนื้อหาหรือหัวข้อมีคำที่ไม่เหมาะสม โปรดแก้ไข'); return;
+    }
+    const contactInfo = activeCurrentUser ? generateContactString(activeCurrentUser) : 'ข้อมูลติดต่อไม่พร้อมใช้งาน';
+    const dataToUpdate: Partial<HelperProfile> = {
+      ...updatedProfileDataFromForm,
+      contact: contactInfo,
+    };
+     if (USE_FIREBASE) {
+        const profileDocRef = doc(db, "helperProfiles", updatedProfileDataFromForm.id);
+        await updateDoc(profileDocRef, dataToUpdate);
+    } else {
+        setMockHelperProfiles(prevProfiles => prevProfiles.map(p => (p.id === updatedProfileDataFromForm.id ? { ...originalProfile, ...dataToUpdate } as HelperProfile : p)));
+    }
+    setItemToEdit(null); setEditingItemType(null);
+    navigateTo(sourceViewForForm || View.Home); setSourceViewForForm(null);
+    alert('แก้ไขโปรไฟล์ผู้ช่วยเรียบร้อยแล้ว');
+  };
+
+  const handleSubmitJobForm = (formDataFromForm: JobFormData & { id?: string }) => {
+    if (containsBlacklistedWords(formDataFromForm.description) || containsBlacklistedWords(formDataFromForm.title)) {
+        alert('เนื้อหาหรือหัวข้อมีคำที่ไม่เหมาะสม โปรดแก้ไข'); return;
+    }
+    if (formDataFromForm.id && itemToEdit && editingItemType === 'job') {
+      handleUpdateJob(formDataFromForm as JobFormData & { id: string });
+    } else {
+      handleAddJob(formDataFromForm);
+    }
+  };
+
+  const handleSubmitHelperProfileForm = (formDataFromForm: HelperProfileFormData & { id?: string }) => {
+     if (containsBlacklistedWords(formDataFromForm.details) || containsBlacklistedWords(formDataFromForm.profileTitle)) {
+        alert('เนื้อหาหรือหัวข้อมีคำที่ไม่เหมาะสม โปรดแก้ไข'); return;
+    }
+    if (formDataFromForm.id && itemToEdit && editingItemType === 'profile') {
+      handleUpdateHelperProfile(formDataFromForm as HelperProfileFormData & { id: string });
+    } else {
+      handleAddHelperProfile(formDataFromForm);
+    }
+  };
+
   const handleCancelEditOrPost = () => {
     const targetView = sourceViewForForm || View.Home;
-    setItemToEdit(null);
-    setEditingItemType(null);
-    setSourceViewForForm(null);
+    setItemToEdit(null); setEditingItemType(null); setSourceViewForForm(null); setSelectedPostId(null);
     navigateTo(targetView);
   };
 
+  const handleAddJob = useCallback(async (newJobData: JobFormData) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    if (!activeCurrentUser) {
+      requestLoginForAction(View.PostJob); return;
+    }
+    if (activeCurrentUser.isMuted) {
+        alert("บัญชีของคุณถูกจำกัดการโพสต์"); return;
+    }
+    if (containsBlacklistedWords(newJobData.description) || containsBlacklistedWords(newJobData.title)) {
+        alert('เนื้อหาหรือหัวข้อมีคำที่ไม่เหมาะสม โปรดแก้ไข'); return;
+    }
+
+    const contactInfo = generateContactString(activeCurrentUser);
+    const jobPayload: Omit<Job, 'id'> = {
+      ...newJobData,
+      ownerId: activeCurrentUser.id, // Added ownerId
+      userId: activeCurrentUser.id,
+      username: activeCurrentUser.username,
+      contact: contactInfo,
+      postedAt: USE_FIREBASE ? serverTimestamp() : new Date().toISOString(),
+      isSuspicious: false, isPinned: false, isHired: false,
+    };
+
+    if (USE_FIREBASE) {
+        await addDoc(collection(db, "jobs"), jobPayload);
+    } else {
+        const newJobWithId: Job = { ...jobPayload, id: Date.now().toString(), postedAt: new Date().toISOString() };
+        setMockJobs(prevJobs => [newJobWithId, ...prevJobs]);
+    }
+    navigateTo(sourceViewForForm === View.MyPosts ? View.MyPosts : View.FindJobs);
+    setSourceViewForForm(null);
+    alert('ประกาศงานของคุณถูกเพิ่มเรียบร้อยแล้ว!');
+  }, [currentUser, mockCurrentUser, sourceViewForForm, navigateTo, requestLoginForAction, USE_FIREBASE]);
+
+  const handleAddHelperProfile = useCallback(async (newProfileData: HelperProfileFormData) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    if (!activeCurrentUser) {
+      requestLoginForAction(View.OfferHelp); return;
+    }
+    if (activeCurrentUser.isMuted) {
+        alert("บัญชีของคุณถูกจำกัดการโพสต์"); return;
+    }
+    if (containsBlacklistedWords(newProfileData.details) || containsBlacklistedWords(newProfileData.profileTitle)) {
+        alert('เนื้อหาหรือหัวข้อมีคำที่ไม่เหมาะสม โปรดแก้ไข'); return;
+    }
+
+    if (!activeCurrentUser.gender || !activeCurrentUser.birthdate || !activeCurrentUser.educationLevel ||
+        activeCurrentUser.gender === GenderOption.NotSpecified || activeCurrentUser.educationLevel === HelperEducationLevelOption.NotStated) {
+        alert('กรุณาอัปเดตข้อมูลส่วนตัว (เพศ, วันเกิด, ระดับการศึกษา) ในหน้าโปรไฟล์ของคุณก่อนสร้างโปรไฟล์ผู้ช่วย');
+        navigateTo(View.UserProfile); return;
+    }
+    const contactInfo = generateContactString(activeCurrentUser);
+    const profilePayload: Omit<HelperProfile, 'id'> = {
+      ...newProfileData,
+      ownerId: activeCurrentUser.id, // Added ownerId
+      userId: activeCurrentUser.id,
+      username: activeCurrentUser.username,
+      contact: contactInfo,
+      gender: activeCurrentUser.gender,
+      birthdate: activeCurrentUser.birthdate,
+      educationLevel: activeCurrentUser.educationLevel,
+      postedAt: USE_FIREBASE ? serverTimestamp() : new Date().toISOString(),
+      isSuspicious: false, isPinned: false, isUnavailable: false,
+      adminVerifiedExperience: false, interestedCount: 0,
+    };
+    if (USE_FIREBASE) {
+        await addDoc(collection(db, "helperProfiles"), profilePayload);
+    } else {
+        const newProfileWithId: HelperProfile = { ...profilePayload, id: Date.now().toString(), postedAt: new Date().toISOString() };
+        setMockHelperProfiles(prevProfiles => [newProfileWithId, ...prevProfiles]);
+    }
+    navigateTo(sourceViewForForm === View.MyPosts ? View.MyPosts : View.FindHelpers);
+    setSourceViewForForm(null);
+    alert('โปรไฟล์ของคุณถูกเพิ่มเรียบร้อยแล้ว!');
+  }, [currentUser, mockCurrentUser, sourceViewForForm, navigateTo, requestLoginForAction, USE_FIREBASE]);
+
   const openConfirmModal = (title: string, message: string, onConfirm: () => void) => {
-    setConfirmModalTitle(title);
-    setConfirmModalMessage(message);
-    setOnConfirmAction(() => onConfirm); // Store the function itself
-    setIsConfirmModalOpen(true);
+    setConfirmModalTitle(title); setConfirmModalMessage(message);
+    setOnConfirmAction(() => onConfirm); setIsConfirmModalOpen(true);
   };
 
   const closeConfirmModal = () => {
-    setIsConfirmModalOpen(false);
-    setConfirmModalMessage('');
-    setConfirmModalTitle('');
-    setOnConfirmAction(null);
+    setIsConfirmModalOpen(false); setConfirmModalMessage(''); setConfirmModalTitle(''); setOnConfirmAction(null);
   };
 
   const handleConfirmDeletion = () => {
-    if (onConfirmAction) {
-      onConfirmAction();
-    }
+    if (onConfirmAction) onConfirmAction();
     closeConfirmModal();
   };
 
-  const handleDeleteJob = async (jobId: string) => {
-    const jobToDelete = jobs.find(job => job.id === jobId);
-    if (!jobToDelete) return alert('ไม่พบประกาศงาน');
-    if (jobToDelete.userId !== currentUser?.id && !currentUser?.isAdmin) return alert('คุณไม่มีสิทธิ์ลบ');
-
-    openConfirmModal('ยืนยันการลบประกาศงาน', `ต้องการลบ "${jobToDelete.title}"?`, async () => {
-      try {
-        await deleteDoc(doc(db, "jobs", jobId));
-        alert(`ลบประกาศงาน "${jobToDelete.title}" เรียบร้อยแล้ว`);
-      } catch (error) {
-        console.error("Error deleting job: ", error);
-        alert("เกิดข้อผิดพลาดในการลบประกาศงาน");
-      }
-    });
-  };
-
-  const handleDeleteHelperProfile = async (profileId: string) => {
-    const profileToDelete = helperProfiles.find(profile => profile.id === profileId);
-    if (!profileToDelete) return alert('ไม่พบโปรไฟล์');
-    if (profileToDelete.userId !== currentUser?.id && !currentUser?.isAdmin) return alert('คุณไม่มีสิทธิ์ลบ');
-    
-    openConfirmModal('ยืนยันการลบโปรไฟล์', `ต้องการลบโปรไฟล์ "${profileToDelete.profileTitle}"?`, async () => {
-      try {
-        await deleteDoc(doc(db, "helperProfiles", profileId));
-        alert(`ลบโปรไฟล์ "${profileToDelete.profileTitle}" เรียบร้อยแล้ว`);
-      } catch (error) {
-        console.error("Error deleting helper profile: ", error);
-        alert("เกิดข้อผิดพลาดในการลบโปรไฟล์");
-      }
-    });
-  };
-  
-  const handleDeleteItemFromMyPosts = (itemId: string, itemType: 'job' | 'profile') => {
+  const handleDeleteItemFromMyPosts = (itemId: string, itemType: 'job' | 'profile' | 'webboardPost') => {
     if (itemType === 'job') handleDeleteJob(itemId);
-    else handleDeleteHelperProfile(itemId);
+    else if (itemType === 'profile') handleDeleteHelperProfile(itemId);
+    else if (itemType === 'webboardPost') handleDeleteWebboardPost(itemId);
   };
 
-  const handleToggleFirestoreFlag = async (collectionName: string, docId: string, fieldName: string) => {
-    const docRef = doc(db, collectionName, docId);
-    try {
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        await updateDoc(docRef, { [fieldName]: !docSnap.data()?.[fieldName] });
-      }
-    } catch (error) {
-      console.error(`Error toggling ${fieldName} for ${docId} in ${collectionName}: `, error);
-      alert(`เกิดข้อผิดพลาดในการอัปเดตสถานะ`);
-    }
+  const handleDeleteJob = (jobId: string) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    const activeJobs = USE_FIREBASE ? jobs : mockJobs;
+    const jobToDelete = activeJobs.find(job => job.id === jobId);
+    if (!jobToDelete) { alert('เกิดข้อผิดพลาด: ไม่พบประกาศงานที่ต้องการลบในระบบ'); return; }
+    // Ownership check by Firestore rules
+    // if (jobToDelete.userId !== activeCurrentUser?.id && activeCurrentUser?.role !== UserRole.Admin) {
+    //   alert('คุณไม่มีสิทธิ์ลบประกาศงานนี้'); return;
+    // }
+    openConfirmModal('ยืนยันการลบประกาศงาน', `คุณแน่ใจหรือไม่ว่าต้องการลบประกาศงาน "${jobToDelete.title}"?`, async () => {
+      if (USE_FIREBASE) await deleteDoc(doc(db, "jobs", jobId));
+      else setMockJobs(prevJobs => prevJobs.filter(job => job.id !== jobId));
+      alert(`ลบประกาศงาน "${jobToDelete.title}" เรียบร้อยแล้ว`);
+    });
   };
 
-  const handleToggleSuspiciousJob = (jobId: string) => handleToggleFirestoreFlag("jobs", jobId, "isSuspicious");
-  const handleToggleSuspiciousHelperProfile = (profileId: string) => handleToggleFirestoreFlag("helperProfiles", profileId, "isSuspicious");
-  const handleTogglePinnedJob = (jobId: string) => handleToggleFirestoreFlag("jobs", jobId, "isPinned");
-  const handleTogglePinnedHelperProfile = (profileId: string) => handleToggleFirestoreFlag("helperProfiles", profileId, "isPinned");
-  const handleToggleVerifiedExperience = (profileId: string) => handleToggleFirestoreFlag("helperProfiles", profileId, "adminVerifiedExperience");
-  const handleToggleHiredJobForUserOrAdmin = (jobId: string) => handleToggleFirestoreFlag("jobs", jobId, "isHired");
-  const handleToggleUnavailableHelperProfileForUserOrAdmin = (profileId: string) => handleToggleFirestoreFlag("helperProfiles", profileId, "isUnavailable");
-
-  const handleToggleItemStatusFromMyPosts = (itemId: string, itemType: 'job' | 'profile') => {
-    if (itemType === 'job') handleToggleHiredJobForUserOrAdmin(itemId);
-    else handleToggleUnavailableHelperProfileForUserOrAdmin(itemId);
+  const handleDeleteHelperProfile = (profileId: string) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    const activeHelperProfiles = USE_FIREBASE ? helperProfiles : mockHelperProfiles;
+    const profileToDelete = activeHelperProfiles.find(profile => profile.id === profileId);
+    if (!profileToDelete) { alert('เกิดข้อผิดพลาด: ไม่พบโปรไฟล์ที่ต้องการลบในระบบ'); return; }
+    // Ownership check by Firestore rules
+    // if (profileToDelete.userId !== activeCurrentUser?.id && activeCurrentUser?.role !== UserRole.Admin) {
+    //   alert('คุณไม่มีสิทธิ์ลบโปรไฟล์นี้'); return;
+    // }
+    openConfirmModal('ยืนยันการลบโปรไฟล์', `คุณแน่ใจหรือไม่ว่าต้องการลบโปรไฟล์ "${profileToDelete.profileTitle}"?`, async () => {
+      if (USE_FIREBASE) await deleteDoc(doc(db, "helperProfiles", profileId));
+      else setMockHelperProfiles(prevProfiles => prevProfiles.filter(profile => profile.id !== profileId));
+      alert(`ลบโปรไฟล์ "${profileToDelete.profileTitle}" เรียบร้อยแล้ว`);
+    });
   };
-  
-  const handleLogHelperContactInteraction = async (helperProfileId: string) => {
-    if (!currentUser) return console.warn("Attempted to log interaction without current user.");
 
-    const helperProfileRef = doc(db, "helperProfiles", helperProfileId);
-    const helperProfileSnap = await getDoc(helperProfileRef);
-
-    if (!helperProfileSnap.exists()) return alert("ไม่พบโปรไฟล์ผู้ช่วย");
-    const helperProfileData = helperProfileSnap.data() as HelperProfile;
-
-    // Check if already interested to avoid duplicate count increment and array add
-    if (helperProfileData.interestedUserIds?.includes(currentUser.id)) {
-      // alert("คุณเคยกดสนใจผู้ช่วยคนนี้แล้ว"); // Alerting might be too intrusive if they just want contact info again
-      // No need to re-log the "interest" part of the interaction if already done.
-      // However, we should still log a general "contact_helper" interaction if that's a separate concept.
-      // For now, we assume "interested" click IS the contact interaction for badge purposes.
+  const toggleItemField = async (collectionName: string, itemId: string, fieldName: string, currentItems: any[], setItemsFunction: Function) => {
+    const item = currentItems.find(i => i.id === itemId);
+    if (!item) return;
+    const newValue = !item[fieldName];
+    if (USE_FIREBASE) {
+        await updateDoc(doc(db, collectionName, itemId), { [fieldName]: newValue });
     } else {
-      // Atomically update interested count and add user to interestedUserIds
-      await updateDoc(helperProfileRef, {
-        interestedCount: increment(1),
-        interestedUserIds: arrayUnion(currentUser.id)
-      });
+        setItemsFunction((prevItems: any[]) => prevItems.map(i => i.id === itemId ? { ...i, [fieldName]: newValue } : i));
+    }
+  };
+
+  const handleToggleSuspiciousJob = (jobId: string) => toggleItemField("jobs", jobId, "isSuspicious", USE_FIREBASE ? jobs : mockJobs, USE_FIREBASE ? setJobs : setMockJobs);
+  const handleToggleSuspiciousHelperProfile = (profileId: string) => toggleItemField("helperProfiles", profileId, "isSuspicious", USE_FIREBASE ? helperProfiles : mockHelperProfiles, USE_FIREBASE ? setHelperProfiles : setMockHelperProfiles);
+  const handleTogglePinnedJob = (jobId: string) => toggleItemField("jobs", jobId, "isPinned", USE_FIREBASE ? jobs : mockJobs, USE_FIREBASE ? setJobs : setMockJobs);
+  const handleTogglePinnedHelperProfile = (profileId: string) => toggleItemField("helperProfiles", profileId, "isPinned", USE_FIREBASE ? helperProfiles : mockHelperProfiles, USE_FIREBASE ? setHelperProfiles : setMockHelperProfiles);
+  const handleToggleVerifiedExperience = (profileId: string) => toggleItemField("helperProfiles", profileId, "adminVerifiedExperience", USE_FIREBASE ? helperProfiles : mockHelperProfiles, USE_FIREBASE ? setHelperProfiles : setMockHelperProfiles);
+  
+  const handleToggleHiredJobForUserOrAdmin = (jobId: string) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    const activeJobs = USE_FIREBASE ? jobs : mockJobs;
+    const jobToToggle = activeJobs.find(j => j.id === jobId);
+    if (jobToToggle && (jobToToggle.userId === activeCurrentUser?.id || activeCurrentUser?.role === UserRole.Admin)) {
+        toggleItemField("jobs", jobId, "isHired", activeJobs, USE_FIREBASE ? setJobs : setMockJobs);
+    } else { alert("คุณไม่มีสิทธิ์เปลี่ยนสถานะงานนี้"); }
+  };
+  const handleToggleUnavailableHelperProfileForUserOrAdmin = (profileId: string) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    const activeHelperProfiles = USE_FIREBASE ? helperProfiles : mockHelperProfiles;
+    const profileToToggle = activeHelperProfiles.find(p => p.id === profileId);
+     if (profileToToggle && (profileToToggle.userId === activeCurrentUser?.id || activeCurrentUser?.role === UserRole.Admin)) {
+        toggleItemField("helperProfiles", profileId, "isUnavailable", activeHelperProfiles, USE_FIREBASE ? setHelperProfiles : setMockHelperProfiles);
+    } else { alert("คุณไม่มีสิทธิ์เปลี่ยนสถานะโปรไฟล์นี้"); }
+  };
+
+  const handleToggleItemStatusFromMyPosts = (itemId: string, itemType: 'job' | 'profile' | 'webboardPost') => {
+    if (itemType === 'job') handleToggleHiredJobForUserOrAdmin(itemId);
+    else if (itemType === 'profile') handleToggleUnavailableHelperProfileForUserOrAdmin(itemId);
+  };
+
+  const handleLogHelperContactInteraction = async (helperProfileId: string) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    const activeHelperProfiles = USE_FIREBASE ? helperProfiles : mockHelperProfiles;
+
+    if (!activeCurrentUser) {
+      requestLoginForAction(View.FindHelpers, { intent: 'contactHelper', postId: helperProfileId }); return;
+    }
+    const helperProfile = activeHelperProfiles.find(hp => hp.id === helperProfileId);
+    if (!helperProfile) { console.warn(`Helper profile ${helperProfileId} not found.`); return; }
+    if (activeCurrentUser.id === helperProfile.userId) return;
+
+    const newInteractionData: Omit<Interaction, 'interactionId'> = { // interactionId will be Firestore doc ID
+        helperUserId: helperProfile.userId, 
+        employerUserId: activeCurrentUser.id,
+        timestamp: USE_FIREBASE ? serverTimestamp() : new Date().toISOString(),
+        type: 'contact_helper',
+    };
+
+    if (USE_FIREBASE) {
+        // Check if interaction already exists (optional, depends on desired logic)
+        // For simplicity, we increment count and add interaction log.
+        await updateDoc(doc(db, "helperProfiles", helperProfileId), {
+            interestedCount: (helperProfile.interestedCount || 0) + 1
+        });
+        await addDoc(collection(db, "interactions"), newInteractionData);
+    } else {
+        let clickedMap: { [userId: string]: string[] } = {};
+        const savedClickedMap = localStorage.getItem(USER_CLICKED_HELPERS_LS_KEY);
+        if (savedClickedMap) {
+            try { clickedMap = JSON.parse(savedClickedMap); } catch (e) { console.error("Error parsing clicked map", e); }
+        }
+        const userClickedList = clickedMap[activeCurrentUser.id] || [];
+        if (!userClickedList.includes(helperProfileId)) {
+            setMockHelperProfiles(prevProfiles =>
+                prevProfiles.map(hp => hp.id === helperProfileId ? { ...hp, interestedCount: (hp.interestedCount || 0) + 1 } : hp)
+            );
+            clickedMap[activeCurrentUser.id] = [...userClickedList, helperProfileId];
+            localStorage.setItem(USER_CLICKED_HELPERS_LS_KEY, JSON.stringify(clickedMap));
+            const newMockInteraction: Interaction = { ...newInteractionData, interactionId: Date.now().toString(), timestamp: new Date().toISOString() };
+            setMockInteractions(prev => [...prev, newMockInteraction]);
+        }
+    }
+  };
+
+  const handleAddOrUpdateWebboardPost = async (postData: { title: string; body: string; image?: string; imageFile?: File }, postIdToUpdate?: string) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    if (!activeCurrentUser) {
+      requestLoginForAction(View.Webboard, { action: postIdToUpdate ? 'editPost' : 'createPost', postId: postIdToUpdate }); return;
+    }
+    if (activeCurrentUser.isMuted) {
+        alert("บัญชีของคุณถูกจำกัดการโพสต์"); return;
+    }
+    if (containsBlacklistedWords(postData.title) || containsBlacklistedWords(postData.body)) {
+        alert('เนื้อหาหรือหัวข้อมีคำที่ไม่เหมาะสม โปรดแก้ไข'); return;
     }
 
-    // Log the interaction for "hasBeenContacted" badge, regardless of whether it was a first-time interest.
-    // This assumes any click on "Contact this helper" is an interaction attempt.
-    const newInteraction: Omit<Interaction, 'id'> = {
-      helperUserId: helperProfileData.userId, // The actual User ID of the helper
-      helperProfileId: helperProfileId, // The ID of the HelperProfile document
-      employerUserId: currentUser.id,
-      timestamp: serverTimestamp() as Timestamp,
-      type: 'contact_helper',
+    let finalImageURL = postData.image || ''; // Keep existing image if not changed or no new file
+    
+    if (USE_FIREBASE) {
+        if (postData.imageFile) {
+            const imageName = `webboardImages/${activeCurrentUser.id}/${Date.now()}_${postData.imageFile.name}`;
+            const storageRefImg = ref(storage, imageName);
+            const uploadTask = uploadBytesResumable(storageRefImg, postData.imageFile);
+            await new Promise<void>((resolve, reject) => {
+                uploadTask.on('state_changed', 
+                    null, 
+                    (error) => { console.error("Image upload failed:", error); reject(error); }, 
+                    async () => {
+                        finalImageURL = await getDownloadURL(uploadTask.snapshot.ref);
+                        // If editing and there was an old image, delete it
+                        if (postIdToUpdate) {
+                            const oldPost = webboardPosts.find(p => p.id === postIdToUpdate);
+                            if (oldPost?.image && oldPost.image.includes('firebasestorage') && oldPost.image !== finalImageURL) {
+                                try { await deleteObject(ref(storage, oldPost.image)); } catch (e) { console.warn("Old webboard image deletion failed", e); }
+                            }
+                        }
+                        resolve();
+                    }
+                );
+            });
+        } else if (postData.image === undefined && postIdToUpdate) { // Image explicitly removed
+             finalImageURL = '';
+             const oldPost = webboardPosts.find(p => p.id === postIdToUpdate);
+             if (oldPost?.image && oldPost.image.includes('firebasestorage')) {
+                try { await deleteObject(ref(storage, oldPost.image)); } catch (e) { console.warn("Webboard image deletion failed", e); }
+             }
+        }
+
+        const payload = { 
+            title: postData.title, 
+            body: postData.body, 
+            image: finalImageURL, 
+            updatedAt: serverTimestamp(),
+            authorPhoto: activeCurrentUser.photo || '', // Update authorPhoto on edit too
+        };
+
+        if (postIdToUpdate) {
+            const postToEdit = webboardPosts.find(p => p.id === postIdToUpdate);
+            if (!postToEdit) { alert('ไม่พบโพสต์ที่ต้องการแก้ไข'); return; }
+            // Ownership/role check by Firestore rules
+            // if (postToEdit.userId !== activeCurrentUser.id && activeCurrentUser.role !== UserRole.Admin && activeCurrentUser.role !== UserRole.Moderator) {
+            //     alert('คุณไม่มีสิทธิ์แก้ไขโพสต์นี้'); return;
+            // }
+            await updateDoc(doc(db, "webboardPosts", postIdToUpdate), payload);
+            alert('แก้ไขโพสต์เรียบร้อยแล้ว!');
+        } else {
+            const newPostPayload: Omit<WebboardPost, 'id'> = {
+                ...payload,
+                ownerId: activeCurrentUser.id, // Added ownerId
+                userId: activeCurrentUser.id,
+                username: activeCurrentUser.username,
+                createdAt: serverTimestamp(),
+                likes: [],
+                isPinned: false,
+            };
+            const newDocRef = await addDoc(collection(db, "webboardPosts"), newPostPayload);
+            postIdToUpdate = newDocRef.id; // Get new ID for navigation
+            alert('สร้างโพสต์ใหม่เรียบร้อยแล้ว!');
+        }
+
+    } else { // Mock logic
+        if (postIdToUpdate) {
+            const postToEdit = mockWebboardPosts.find(p => p.id === postIdToUpdate);
+            if (!postToEdit) { alert('ไม่พบโพสต์ที่ต้องการแก้ไข'); return; }
+            if (postToEdit.userId !== activeCurrentUser.id && activeCurrentUser.role !== UserRole.Admin && activeCurrentUser.role !== UserRole.Moderator) {
+                alert('คุณไม่มีสิทธิ์แก้ไขโพสต์นี้'); return;
+            }
+            setMockWebboardPosts(prevPosts =>
+                prevPosts.map(p => p.id === postIdToUpdate ? { ...p, title: postData.title, body: postData.body, image: postData.image, authorPhoto: activeCurrentUser.photo, updatedAt: new Date().toISOString(), isEditing: false } : p)
+            );
+            alert('แก้ไขโพสต์เรียบร้อยแล้ว!');
+        } else {
+            const newPost: WebboardPost = {
+                id: Date.now().toString(),
+                ownerId: activeCurrentUser.id, // Added ownerId
+                title: postData.title, body: postData.body, image: postData.image,
+                userId: activeCurrentUser.id, username: activeCurrentUser.username, authorPhoto: activeCurrentUser.photo,
+                createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+                likes: [], isPinned: false,
+            };
+            setMockWebboardPosts(prev => [newPost, ...prev]);
+            postIdToUpdate = newPost.id; // Get new ID for navigation
+            alert('สร้างโพสต์ใหม่เรียบร้อยแล้ว!');
+        }
+    }
+    setItemToEdit(null); setEditingItemType(null);
+    setSelectedPostId(postIdToUpdate || null); 
+    navigateTo(View.Webboard, postIdToUpdate); 
+  };
+
+  const handleAddWebboardComment = async (postId: string, text: string) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    if (!activeCurrentUser) {
+      requestLoginForAction(View.Webboard, { action: 'comment', postId: postId }); return;
+    }
+    if (activeCurrentUser.isMuted) {
+        alert("บัญชีของคุณถูกจำกัดการโพสต์"); return;
+    }
+    if (containsBlacklistedWords(text)) {
+        alert('เนื้อหาคอมเมนต์มีคำที่ไม่เหมาะสม โปรดแก้ไข'); return;
+    }
+    const commentPayload: Omit<WebboardComment, 'id'> = {
+      postId,
+      ownerId: activeCurrentUser.id, // Added ownerId
+      userId: activeCurrentUser.id,
+      username: activeCurrentUser.username,
+      authorPhoto: activeCurrentUser.photo || '',
+      text,
+      createdAt: USE_FIREBASE ? serverTimestamp() : new Date().toISOString(),
+      updatedAt: USE_FIREBASE ? serverTimestamp() : new Date().toISOString(),
     };
-    await addDoc(collection(db, "interactions"), newInteraction);
-    // State for interactions and helperProfiles will update via their onSnapshot listeners
+    if (USE_FIREBASE) {
+        await addDoc(collection(db, "webboardComments"), commentPayload);
+    } else {
+        const newMockComment: WebboardComment = { ...commentPayload, id: Date.now().toString(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+        setMockWebboardComments(prev => [...prev, newMockComment]);
+    }
+  };
+
+  const handleToggleWebboardPostLike = async (postId: string) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    const activePosts = USE_FIREBASE ? webboardPosts : mockWebboardPosts;
+
+    if (!activeCurrentUser) {
+      requestLoginForAction(View.Webboard, { action: 'like', postId: postId }); return;
+    }
+    const postRef = USE_FIREBASE ? doc(db, "webboardPosts", postId) : null;
+    const post = activePosts.find(p => p.id === postId);
+    if (!post) return;
+
+    const alreadyLiked = post.likes.includes(activeCurrentUser.id);
+    let newLikesArray;
+    if (alreadyLiked) {
+      newLikesArray = post.likes.filter(uid => uid !== activeCurrentUser.id);
+    } else {
+      newLikesArray = [...post.likes, activeCurrentUser.id];
+    }
+
+    if (USE_FIREBASE && postRef) {
+        await updateDoc(postRef, { likes: newLikesArray });
+    } else {
+        setMockWebboardPosts(prevPosts =>
+            prevPosts.map(p => p.id === postId ? { ...p, likes: newLikesArray } : p)
+        );
+    }
+  };
+
+  const handleDeleteWebboardPost = (postIdToDelete: string) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    const activePosts = USE_FIREBASE ? webboardPosts : mockWebboardPosts;
+    const postToDelete = activePosts.find(p => p.id === postIdToDelete);
+    if (!postToDelete) return;
+
+    // Ownership/role check by Firestore rules
+    // let canDelete = false;
+    // if (activeCurrentUser?.role === UserRole.Admin) canDelete = true;
+    // else if (activeCurrentUser?.role === UserRole.Moderator) {
+    //     const postAuthor = (USE_FIREBASE ? users : mockUsers).find(u => u.id === postToDelete.userId);
+    //     if (postAuthor?.role !== UserRole.Admin) canDelete = true;
+    //     else { alert("ผู้ตรวจการไม่สามารถลบโพสต์ของแอดมินได้"); return; }
+    // } else if (postToDelete.userId === activeCurrentUser?.id) canDelete = true;
+
+    // if (canDelete) {
+       openConfirmModal('ยืนยันการลบโพสต์', `คุณแน่ใจหรือไม่ว่าต้องการลบโพสต์ "${postToDelete.title}"?`, async () => {
+            if (USE_FIREBASE) {
+                await deleteDoc(doc(db, "webboardPosts", postIdToDelete));
+                // Also delete associated comments (could be a batched write or cloud function)
+                const commentsQueryToDelete = query(collection(db, "webboardComments"), where("postId", "==", postIdToDelete));
+                const commentSnapshots = await getDocs(commentsQueryToDelete); 
+                const batch = writeBatch(db); 
+                commentSnapshots.forEach(docSnap => batch.delete(docSnap.ref));
+                await batch.commit();
+            } else {
+                setMockWebboardPosts(prev => prev.filter(p => p.id !== postIdToDelete));
+                setMockWebboardComments(prev => prev.filter(c => c.postId !== postIdToDelete));
+            }
+            alert(`ลบโพสต์ "${postToDelete.title}" เรียบร้อยแล้ว`);
+            if (selectedPostId === postIdToDelete) {
+                setSelectedPostId(null); navigateTo(View.Webboard);
+            }
+        });
+    // } else { alert("คุณไม่มีสิทธิ์ลบโพสต์นี้"); }
+  };
+
+  const handlePinWebboardPost = async (postId: string) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    if (activeCurrentUser?.role !== UserRole.Admin) {
+        alert("เฉพาะแอดมินเท่านั้นที่สามารถปักหมุดโพสต์ได้"); return;
+    }
+    const activePosts = USE_FIREBASE ? webboardPosts : mockWebboardPosts;
+    const post = activePosts.find(p => p.id === postId);
+    if (!post) return;
+    const newPinnedStatus = !post.isPinned;
+
+    if (USE_FIREBASE) {
+        await updateDoc(doc(db, "webboardPosts", postId), { isPinned: newPinnedStatus });
+    } else {
+        setMockWebboardPosts(prevPosts =>
+            prevPosts.map(p => p.id === postId ? { ...p, isPinned: newPinnedStatus } : p)
+        );
+    }
+  };
+
+  const handleSetUserRole = async (userIdToUpdate: string, newRole: UserRole) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    const activeUsers = USE_FIREBASE ? users : mockUsers;
+
+    if (activeCurrentUser?.role !== UserRole.Admin) {
+      alert("คุณไม่มีสิทธิ์เปลี่ยนบทบาทผู้ใช้"); return;
+    }
+    if (userIdToUpdate === activeCurrentUser.id) {
+        alert("ไม่สามารถเปลี่ยนบทบาทของตัวเองได้"); return;
+    }
+    const userToUpdate = activeUsers.find(u => u.id === userIdToUpdate);
+    if (userToUpdate && userToUpdate.role === UserRole.Admin && newRole !== UserRole.Admin) {
+        alert("ไม่สามารถเปลี่ยนบทบาทของ Admin หลักได้"); return;
+    }
+    if (USE_FIREBASE) {
+        await updateDoc(doc(db, "users", userIdToUpdate), { role: newRole, isAdmin: newRole === UserRole.Admin });
+    } else {
+        setMockUsers(prevUsers =>
+            prevUsers.map(u => u.id === userIdToUpdate ? { ...u, role: newRole, isAdmin: newRole === UserRole.Admin } : u)
+        );
+    }
+    alert(`อัปเดตบทบาทของผู้ใช้ @${activeUsers.find(u=>u.id===userIdToUpdate)?.username} เป็น ${newRole} เรียบร้อยแล้ว`);
+  };
+
+  const handleToggleSiteLock = async () => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    if (activeCurrentUser?.role !== UserRole.Admin) {
+      alert("คุณไม่มีสิทธิ์ดำเนินการนี้"); return;
+    }
+    const newLockStatus = USE_FIREBASE ? !isSiteLocked : !mockIsSiteLocked;
+    if (USE_FIREBASE) {
+        await setDoc(doc(db, "config", "siteStatus"), { isSiteLocked: newLockStatus }, { merge: true }); // Changed to siteStatus
+    } else {
+        setMockIsSiteLocked(newLockStatus);
+    }
   };
 
   const handleFeedbackSubmit = async (feedbackText: string): Promise<boolean> => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
     if (!feedbackText.trim()) {
-        setFeedbackSubmissionStatus('error');
-        setFeedbackSubmissionMessage('กรุณาใส่ความคิดเห็นของคุณ');
-        return false;
+        setFeedbackSubmissionStatus('error'); setFeedbackSubmissionMessage('กรุณาใส่ความคิดเห็นของคุณ'); return false;
     }
-    setFeedbackSubmissionStatus('submitting');
-    setFeedbackSubmissionMessage(null);
+    setFeedbackSubmissionStatus('submitting'); setFeedbackSubmissionMessage(null);
     try {
-        const response = await fetch('https://formspree.io/f/xvgaepzq', { // Keep Formspree for feedback
+        // Using Formspree as before, no change needed for USE_FIREBASE toggle here
+        const response = await fetch('https://formspree.io/f/xvgaepzq', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({
                 feedback: feedbackText, page: currentView, timestamp: new Date().toISOString(),
-                userId: currentUser?.id || 'anonymous', username: currentUser?.username || 'anonymous',
+                userId: activeCurrentUser?.id || 'anonymous', username: activeCurrentUser?.username || 'anonymous',
                 userAgent: navigator.userAgent,
             })
         });
         if (response.ok) {
-            setFeedbackSubmissionStatus('success');
-            setFeedbackSubmissionMessage('ขอบคุณสำหรับความคิดเห็นของคุณ!');
+            setFeedbackSubmissionStatus('success'); setFeedbackSubmissionMessage('ขอบคุณสำหรับความคิดเห็นของคุณ!');
             setIsFeedbackModalOpen(false);
             setTimeout(() => { setFeedbackSubmissionStatus('idle'); setFeedbackSubmissionMessage(null); }, 4000);
             return true;
         } else {
             const errorData = await response.json();
-            const errorMessage = errorData.errors?.map((e: { message: string }) => e.message).join(', ') || 'เกิดข้อผิดพลาดในการส่งความคิดเห็น';
+            console.error('Formspree error:', errorData);
+            const errorMessage = errorData.errors?.map((e: { message: string }) => e.message).join(', ') || 'เกิดข้อผิดพลาดในการส่ง';
             setFeedbackSubmissionStatus('error');
-            setFeedbackSubmissionMessage(errorMessage);
+            setFeedbackSubmissionMessage(`เกิดข้อผิดพลาด: ${errorMessage}. โปรดลองอีกครั้ง`);
             return false;
         }
     } catch (error) {
-        console.error('Error submitting feedback:', error);
+        console.error('Feedback submission network error:', error);
         setFeedbackSubmissionStatus('error');
-        setFeedbackSubmissionMessage('เกิดข้อผิดพลาดในการเชื่อมต่อ โปรดลองอีกครั้ง');
+        setFeedbackSubmissionMessage('เกิดข้อผิดพลาดในการเชื่อมต่อ โปรดตรวจสอบอินเทอร์เน็ตแล้วลองอีกครั้ง');
         return false;
     }
   };
 
-  if (isLoading) {
+
+  useEffect(() => {
+    if (!USE_FIREBASE) {
+        saveMockData();
+    }
+  }, [mockUsers, mockJobs, mockHelperProfiles, mockCurrentUser, mockInteractions, mockWebboardPosts, mockWebboardComments, mockIsSiteLocked, USE_FIREBASE]);
+  
+  
+  const Header = () => (
+    <header className="bg-headerBlue dark:bg-dark-headerBg shadow-md sticky top-0 z-40 font-sans">
+      <nav className="container mx-auto px-4 sm:px-6 py-3">
+        <div className="flex justify-between items-center">
+          <button onClick={() => navigateTo(View.Home)} className="text-xl sm:text-2xl font-bold text-primary dark:text-dark-primary-hover hover:opacity-80 transition-opacity">
+            ✨ หาจ๊อบจ้า ✨
+          </button>
+          <div className="hidden md:flex items-center space-x-2 sm:space-x-3">
+            <NavLinks />
+            <ThemeToggleButton />
+          </div>
+          <div className="md:hidden flex items-center">
+            <ThemeToggleButton />
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="ml-2 p-2 rounded-md text-neutral-dark dark:text-dark-text hover:bg-primary/30 dark:hover:bg-dark-primary/30 focus:outline-none"
+              aria-label="เมนู"
+              aria-expanded={isMobileMenuOpen}
+            >
+              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                {isMobileMenuOpen ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
+                )}
+              </svg>
+            </button>
+          </div>
+        </div>
+        {isMobileMenuOpen && (
+          <div className="md:hidden mt-3 pt-3 border-t border-primary/30 dark:border-dark-primary/30">
+            <div className="flex flex-col space-y-2">
+              <NavLinks isMobile={true} />
+            </div>
+          </div>
+        )}
+      </nav>
+    </header>
+  );
+
+  const NavLinks: React.FC<{isMobile?: boolean}> = ({isMobile = false}) => {
+    const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+    const navButtonClass = isMobile 
+      ? "block w-full text-left px-3 py-2 rounded-md text-base font-medium" 
+      : "px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-sm sm:text-base font-medium";
+    const activeClass = "bg-primary/30 dark:bg-dark-primary/40 text-neutral-dark dark:text-dark-text";
+    const inactiveClass = "hover:bg-primary/20 dark:hover:bg-dark-primary/20 text-neutral-dark dark:text-dark-textMuted";
+
+    const commonLinks = [
+      { view: View.Home, label: "🏠 หน้าหลัก" },
+      { view: View.FindJobs, label: "🔍 หาคนช่วยงาน (ผู้ว่าจ้าง)" },
+      { view: View.FindHelpers, label: "🙋‍♀️ หาคนรับงาน (ผู้ช่วย)" },
+      { view: View.Webboard, label: "💬 กระทู้พูดคุย" },
+      { view: View.AboutUs, label: "✨ เกี่ยวกับเรา" },
+      { view: View.Safety, label: "🛡️ เพื่อความปลอดภัย" },
+    ];
+
+    const userSpecificLinks = activeCurrentUser
+      ? [
+          { view: View.PostJob, label: "📢 ประกาศหางาน" },
+          { view: View.OfferHelp, label: "🙋‍♂️ เสนอตัวช่วยงาน" },
+          { view: View.MyPosts, label: "📁 โพสต์ของฉัน" },
+          { view: View.UserProfile, label: `👤 โปรไฟล์ (${activeCurrentUser.username})` },
+          ...(activeCurrentUser.role === UserRole.Admin
+            ? [{ view: View.AdminDashboard, label: "🔐 แอดมิน" }]
+            : []),
+        ]
+      : [];
+
     return (
-      <div className="flex justify-center items-center h-screen bg-neutral-light dark:bg-dark-pageBg">
-        <div className="text-xl font-semibold text-primary dark:text-dark-primary-DEFAULT">✨ กำลังโหลด หาจ๊อบจ้า... ✨</div>
+      <>
+        {commonLinks.map(link => (
+          <button
+            key={link.view}
+            onClick={() => navigateTo(link.view)}
+            className={`${navButtonClass} ${currentView === link.view ? activeClass : inactiveClass}`}
+            aria-current={currentView === link.view ? 'page' : undefined}
+          >
+            {link.label}
+          </button>
+        ))}
+        {activeCurrentUser && userSpecificLinks.map(link => (
+             <button
+                key={link.view}
+                onClick={() => navigateTo(link.view)}
+                className={`${navButtonClass} ${currentView === link.view ? activeClass : inactiveClass}`}
+                aria-current={currentView === link.view ? 'page' : undefined}
+            >
+                {link.label}
+            </button>
+        ))}
+        {activeCurrentUser ? (
+          <Button
+            onClick={handleLogout}
+            variant={isMobile ? 'outline' : 'accent'}
+            colorScheme="accent"
+            size={isMobile ? 'md' : 'sm'}
+            className={isMobile ? 'w-full mt-2' : ''}
+          >
+            🚪 ออกจากระบบ
+          </Button>
+        ) : (
+          <Button
+            onClick={() => navigateTo(View.Login)}
+            variant={isMobile ? 'login' : "primary"}
+            size={isMobile ? 'md' : 'sm'}
+            className={isMobile ? 'w-full mt-2' : ''}
+          >
+            🔑 เข้าสู่ระบบ/ลงทะเบียน
+          </Button>
+        )}
+        {!isMobile && (
+          <Button
+            onClick={() => setIsFeedbackModalOpen(true)}
+            variant="outline"
+            colorScheme="neutral"
+            size="sm"
+            className="!px-2 !py-1 text-xs"
+            title="ส่งความคิดเห็น"
+          >
+            💬
+          </Button>
+        )}
+        {isMobile && (
+           <Button
+            onClick={() => { setIsFeedbackModalOpen(true); setIsMobileMenuOpen(false);}}
+            variant="outline"
+            colorScheme="neutral"
+            size="md"
+            className='w-full mt-2'
+          >
+            💬 ส่งความคิดเห็นถึงเรา
+          </Button>
+        )}
+      </>
+    );
+  };
+
+  const ThemeToggleButton = () => (
+    <button
+      onClick={toggleTheme}
+      className="p-1.5 sm:p-2 rounded-full hover:bg-accent/30 dark:hover:bg-dark-accent/30 text-neutral-dark dark:text-dark-text focus:outline-none"
+      aria-label={`เปลี่ยนเป็นธีม${theme === 'light' ? 'มืด' : 'สว่าง'}`}
+    >
+      {theme === 'light' ? '🌙' : '☀️'}
+    </button>
+  );
+  
+  const Footer = () => (
+    <footer className="bg-neutral-light dark:bg-dark-cardBg text-center p-4 mt-auto border-t border-neutral-DEFAULT dark:border-dark-border">
+      <p className="text-xs font-sans text-neutral-medium dark:text-dark-textMuted">
+        &copy; {new Date().getFullYear()} ✨ หาจ๊อบจ้า ✨ - งานด่วน หางานเชียงใหม่. All rights reserved.
+      </p>
+    </footer>
+  );
+  
+  const activeCurrentUser = USE_FIREBASE ? currentUser : mockCurrentUser;
+  const effectiveIsSiteLocked = USE_FIREBASE ? isSiteLocked : mockIsSiteLocked;
+
+  if (isLoading && USE_FIREBASE) {
+    return (
+      <div className="fixed inset-0 bg-neutral-light dark:bg-dark-pageBg flex flex-col justify-center items-center z-[10000]">
+        <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-primary dark:border-dark-primary mb-4"></div>
+        <p className="text-lg font-sans text-neutral-dark dark:text-dark-text">กำลังโหลดข้อมูล...</p>
       </div>
     );
   }
-
-  const renderHeader = () => (
-    <header
-      className="sticky top-0 z-50 w-full bg-headerBlue-DEFAULT dark:bg-dark-headerBg text-neutral-dark dark:text-dark-text p-3 sm:p-6 shadow-md"
-    >
-      <div className="container mx-auto flex flex-col sm:flex-row justify-between items-center">
-        <h1
-          className="text-xl sm:text-3xl font-quicksand font-bold tracking-tight cursor-pointer hover:text-opacity-80 dark:hover:text-opacity-80 transition-opacity"
-          onClick={() => navigateTo(View.Home)}
-          aria-label="ไปหน้าแรก"
-        >
-          {/* ✨ หาจ๊อบจ้า ✨ */}
-        </h1>
-        <nav className="mt-2 sm:mt-0 flex items-center justify-center sm:justify-end gap-1 sm:gap-2 overflow-x-auto whitespace-nowrap sm:flex-wrap sm:whitespace-normal sm:overflow-x-visible pb-1 sm:pb-0 w-full sm:w-auto">
-          {currentUser ? (
-            <>
-              <span className="text-xs sm:text-sm font-medium mr-1 flex-shrink-0">สวัสดี, @{currentUser.displayName}!</span>
-              {currentUser.isAdmin && (
-                <Button onClick={() => navigateTo(View.AdminDashboard)} variant="accent" size="sm" className="flex-shrink-0">
-                  🔐 Admin
-                </Button>
-              )}
-              {currentView !== View.UserProfile && (
-                <Button onClick={() => navigateTo(View.UserProfile)} variant="outline" colorScheme="secondary" size="sm" className="flex-shrink-0">
-                  👤 โปรไฟล์ของฉัน
-                </Button>
-              )}
-              {!currentUser.isAdmin && currentView !== View.MyPosts && (
-                 <Button onClick={() => navigateTo(View.MyPosts)} variant="outline" colorScheme="primary" size="sm" className="flex-shrink-0">
-                    📁 โพสต์ของฉัน
-                  </Button>
-              )}
-              <Button onClick={handleLogout} variant="outline" colorScheme="accent" size="sm" className="flex-shrink-0">ออกจากระบบ</Button>
-            </>
-          ) : (
-            <>
-              <Button onClick={() => navigateTo(View.Login)} variant="primary" size="sm" className="flex-shrink-0">เข้าสู่ระบบ</Button>
-              <Button onClick={() => navigateTo(View.Register)} variant="outline" colorScheme="primary" size="sm" className="flex-shrink-0">ลงทะเบียน</Button>
-            </>
-          )}
-           {currentView !== View.Home && (
-            <Button onClick={() => navigateTo(View.Home)} variant="secondary" size="sm" className="ml-auto sm:ml-2 flex-shrink-0">
-              🏠 หน้าแรก
-            </Button>
-          )}
-          {currentUser && currentView !== View.FindJobs && currentView !== View.PostJob && (
-            <Button onClick={() => navigateTo(View.FindJobs)} variant="secondary" size="sm" className="flex-shrink-0">
-              👀 หางาน
-            </Button>
-          )}
-           {currentUser && currentView === View.FindJobs && (
-             <Button onClick={() => { setSourceViewForForm(View.FindJobs); navigateTo(View.PostJob);}} variant="accent" size="sm" className="flex-shrink-0">
-              + ลงประกาศงาน
-            </Button>
-          )}
-           {currentUser && currentView === View.PostJob && !itemToEdit && (
-             <Button onClick={() => navigateTo(View.FindJobs)} variant="secondary" size="sm" className="flex-shrink-0">
-              👀 หางาน
-            </Button>
-          )}
-          {currentUser && currentView !== View.FindHelpers && currentView !== View.OfferHelp && (
-            <Button onClick={() => navigateTo(View.FindHelpers)} variant="secondary" size="sm" className="flex-shrink-0">
-              🫂 ค้นหาผู้ช่วย
-            </Button>
-          )}
-          {currentUser && currentView === View.FindHelpers && (
-             <Button onClick={() => { setSourceViewForForm(View.FindHelpers); navigateTo(View.OfferHelp);}} variant="accent" size="sm" className="flex-shrink-0">
-              + เสนอตัวช่วยงาน
-            </Button>
-          )}
-           {currentUser && currentView === View.OfferHelp && !itemToEdit && (
-             <Button onClick={() => navigateTo(View.FindHelpers)} variant="secondary" size="sm" className="flex-shrink-0">
-              🫂 ค้นหาผู้ช่วย
-            </Button>
-          )}
-        </nav>
-      </div>
-    </header>
-  );
   
-  const renderHome = () => (
-    <div className="flex flex-col items-center justify-center min-h-[calc(100vh-150px)] p-6 sm:p-8 text-center">
-      <h2 className="text-4xl sm:text-5xl font-quicksand font-bold text-neutral-dark dark:text-dark-text mb-3">
-        ✨ หาจ๊อบจ้า ✨
-      </h2>
-      <p className="text-lg text-neutral-dark dark:text-dark-textMuted mb-4 font-normal">
-        จุดรวมงานจิปาถะ งานพาร์ทไทม์ งานโชว์ทักษะด้านอื่นในชีวิต
-      </p>
-      <p className="text-md sm:text-lg text-neutral-dark dark:text-dark-textMuted max-w-xl leading-relaxed mb-10 font-normal">
-        คนเราทุกคนอาจมีทักษะนอกเหนือจากงานหลักและเวลาเหลือ ลองงัดมาใช้หาเงินดู!
-      </p>
+  if (effectiveIsSiteLocked && activeCurrentUser?.role !== UserRole.Admin) {
+    return <SiteLockOverlay />;
+  }
 
-      <div className="w-full max-w-3xl grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div className="bg-white dark:bg-dark-cardBg p-6 rounded-xl shadow-lg border border-primary/30 dark:border-dark-primary-DEFAULT/30">
-          <h3 className="text-2xl font-semibold text-primary dark:text-dark-primary-DEFAULT mb-4">หาคนทำงาน</h3>
-          <div className="space-y-4">
-            <Button
-              onClick={() => {
-                setSourceViewForForm(View.Home);
-                if (currentUser) navigateTo(View.PostJob);
-                else navigateTo(View.Login);
-              }}
-              variant="primary"
-              size="lg"
-              className="w-full text-lg"
-            >
-              📢 มีงานด่วน? ฝากไว้ตรงนี้
-            </Button>
-            <Button
-              onClick={() => navigateTo(View.FindHelpers)}
-              variant="outline"
-              colorScheme="primary"
-              size="lg"
-              className="w-full text-lg"
-            >
-              🔍 กำลังหาคนช่วย? ดูโปรไฟล์เลย
-            </Button>
+
+  return (
+    <>
+      <Header />
+      <main className="flex-grow container mx-auto px-2 py-4 sm:px-4 sm:py-6">
+        {currentView === View.Home && (
+          <div className="text-center p-6 bg-gradient-to-br from-primary/20 via-secondary/10 to-accent/20 dark:from-dark-primary/20 dark:via-dark-secondary/10 dark:to-dark-accent/20 rounded-xl shadow-lg border border-neutral-DEFAULT/30 dark:border-dark-border/30">
+            <h1 className="text-3xl sm:text-4xl font-bold text-neutral-dark dark:text-dark-text mb-4">ยินดีต้อนรับสู่ ✨ หาจ๊อบจ้า ✨</h1>
+            <p className="text-md sm:text-lg text-neutral-medium dark:text-dark-textMuted mb-8">
+              แพลตฟอร์มสำหรับหางานด่วน งานพาร์ทไทม์ และหาคนช่วยงานในเชียงใหม่
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+              <Button onClick={() => navigateTo(View.FindJobs)} variant="primary" size="lg" className="w-full shadow-xl hover:scale-105 transform transition-transform">
+                🔍 ฉันกำลังหาคนช่วยงาน
+              </Button>
+              <Button onClick={() => navigateTo(View.FindHelpers)} variant="secondary" size="lg" className="w-full shadow-xl hover:scale-105 transform transition-transform">
+                🙋‍♀️ ฉันพร้อมรับงาน/เสนอตัวช่วย
+              </Button>
+            </div>
+             <div className="mt-8">
+                <Button onClick={() => navigateTo(View.Webboard)} variant="accent" size="md" className="w-full sm:w-auto shadow-lg hover:scale-105 transform transition-transform">
+                    💬 ไปที่กระทู้พูดคุย
+                </Button>
+            </div>
           </div>
-        </div>
-
-        <div className="bg-white dark:bg-dark-cardBg p-6 rounded-xl shadow-lg border border-secondary/30 dark:border-dark-secondary-DEFAULT/30">
-          <h3 className="text-2xl font-semibold text-secondary-hover dark:text-dark-secondary-hover mb-4">คนอยากหางาน</h3>
-          <div className="space-y-4">
-            <Button
-              onClick={() => {
-                setSourceViewForForm(View.Home);
-                if (currentUser) navigateTo(View.OfferHelp);
-                else navigateTo(View.Login);
-              }}
-              variant="secondary"
-              size="lg"
-              className="w-full text-lg"
-            >
-              🙋‍♀️ ว่างอยู่! พร้อมรับงาน
-            </Button>
-            <Button
-              onClick={() => navigateTo(View.FindJobs)}
-              variant="outline"
-              colorScheme="secondary"
-              size="lg"
-              className="w-full text-lg"
-            >
-              👀 อยากหางาน? ดูโพสต์งานเลย
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderPostJob = () => {
-    if (!currentUser) {
-      setTimeout(() => navigateTo(View.Login), 0); // Schedule navigation to avoid state update during render
-      return <p className="text-center p-8">กำลังเปลี่ยนเส้นทางไปยังหน้าเข้าสู่ระบบ...</p>;
-    }
-    return (
-      <PostJobForm
-        onSubmitJob={handleSubmitJobForm}
-        onCancel={handleCancelEditOrPost}
-        initialData={editingItemType === 'job' ? itemToEdit as Job : undefined}
-        isEditing={!!itemToEdit && editingItemType === 'job'}
-      />
-    );
-  };
-
-  const renderOfferHelpForm = () => {
-    if (!currentUser) {
-      setTimeout(() => navigateTo(View.Login), 0);
-      return <p className="text-center p-8">กำลังเปลี่ยนเส้นทางไปยังหน้าเข้าสู่ระบบ...</p>;
-    }
-     if (!itemToEdit && (!currentUser.gender || !currentUser.birthdate || !currentUser.educationLevel || currentUser.gender === GenderOption.NotSpecified || currentUser.educationLevel === HelperEducationLevelOption.NotStated)) {
-        setTimeout(() => {
-            alert('กรุณาอัปเดตข้อมูลส่วนตัว (เพศ, วันเกิด, ระดับการศึกษา) ในหน้า "โปรไฟล์ของฉัน" ก่อน จึงจะสามารถสร้างโปรไฟล์ผู้ช่วยงานได้');
-            navigateTo(View.UserProfile);
-        }, 0);
-        return <p className="text-center p-8">ข้อมูลส่วนตัวยังไม่ครบถ้วน กำลังเปลี่ยนเส้นทางไปหน้าโปรไฟล์...</p>;
-    }
-    return (
-      <OfferHelpForm
-        onSubmitProfile={handleSubmitHelperProfileForm}
-        onCancel={handleCancelEditOrPost}
-        initialData={editingItemType === 'profile' ? itemToEdit as HelperProfile : undefined}
-        isEditing={!!itemToEdit && editingItemType === 'profile'}
-      />
-    );
-  };
-
-  const renderFindJobs = () => (
-    <div className="container mx-auto p-4 sm:p-8">
-      <h2 className="text-3xl font-semibold text-primary dark:text-dark-primary-DEFAULT mb-8 text-center">👀 รายการงานด่วนทั้งหมด</h2>
-      {jobs.length === 0 ? (
-        <div className="text-center py-10">
-          <svg className="mx-auto h-24 w-24 text-neutral-DEFAULT dark:text-dark-border" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-            <path vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-          </svg>
-          <p className="mt-3 text-xl text-neutral-dark dark:text-dark-textMuted font-normal">ยังไม่มีงานประกาศในขณะนี้ ลองแวะมาใหม่นะ</p>
-          {currentUser && (
-            <Button onClick={() => { setSourceViewForForm(View.FindJobs); navigateTo(View.PostJob);}} variant="primary" size="md" className="mt-6">
-              เป็นคนแรกที่ลงประกาศงาน!
-            </Button>
-          )}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {jobs.sort((a, b) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0) || b.postedAt.toMillis() - a.postedAt.toMillis()).map(job => (
-            <JobCard key={job.id} job={job} navigateTo={navigateTo} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-
- const renderFindHelpers = () => {
-    const enrichedHelperProfilesList: EnrichedHelperProfile[] = helperProfiles.map(hp => {
-      const user = users.find(u => u.id === hp.userId);
-      return {
-        ...hp,
-        userPhotoURL: user?.photoURL,
-        userAddress: user?.address, 
-        userDisplayName: user?.displayName || user?.username || 'User',
-        verifiedExperienceBadge: hp.adminVerifiedExperience || false,
-        profileCompleteBadge: checkProfileCompleteness(user),
-        hasBeenContactedBadge: checkHasBeenContacted(hp.userId, interactions), // Check based on helper's main user ID
-        warningBadge: hp.isSuspicious || false,
-        interestedCount: hp.interestedCount || 0,
-      };
-    }).sort((a, b) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0) || b.postedAt.toMillis() - a.postedAt.toMillis());
-
-    return (
-    <div className="container mx-auto p-4 sm:p-8">
-      <h2 className="text-3xl font-semibold text-secondary-hover dark:text-dark-secondary-hover mb-3 text-center">🧑‍🔧 คนขยันพร้อมช่วย อยู่ตรงนี้แล้ว</h2>
-      <p className="text-md text-neutral-dark dark:text-dark-textMuted mb-8 text-center max-w-xl mx-auto font-normal">
-        ลองดูโปรไฟล์ของผู้ที่พร้อมช่วยงานช่วงสั้น ๆ ในเชียงใหม่<br/>
-        เลือกคนที่ตรงกับความต้องการ แล้วติดต่อได้เลย
-      </p>
-      {enrichedHelperProfilesList.length === 0 ? (
-         <div className="text-center py-10">
-           <svg className="mx-auto h-24 w-24 text-neutral-DEFAULT dark:text-dark-border" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-            <path vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-2.144M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-          </svg>
-          <p className="mt-3 text-xl text-neutral-dark dark:text-dark-textMuted font-normal">ยังไม่มีผู้เสนอตัวช่วยงานในขณะนี้</p>
-          {currentUser && (
-            <Button onClick={() => { setSourceViewForForm(View.FindHelpers); navigateTo(View.OfferHelp);}} variant="secondary" size="md" className="mt-6">
-              เป็นคนแรกที่เสนอตัวช่วยงาน!
-            </Button>
-          )}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {enrichedHelperProfilesList.map(profile => (
-            <HelperCard 
-              key={profile.id} 
-              profile={profile} 
-              onNavigateToPublicProfile={handleNavigateToPublicProfile} 
-              navigateTo={navigateTo} 
-              onLogHelperContact={handleLogHelperContactInteraction}
+        )}
+        {currentView === View.PostJob && (
+          <PostJobForm 
+            onSubmitJob={handleSubmitJobForm} 
+            onCancel={handleCancelEditOrPost} 
+            initialData={editingItemType === 'job' ? itemToEdit as Job : undefined}
+            isEditing={editingItemType === 'job' && !!itemToEdit}
+          />
+        )}
+        {currentView === View.OfferHelp && (
+          <OfferHelpForm 
+            onSubmitProfile={handleSubmitHelperProfileForm} 
+            onCancel={handleCancelEditOrPost}
+            initialData={editingItemType === 'profile' ? itemToEdit as HelperProfile : undefined}
+            isEditing={editingItemType === 'profile' && !!itemToEdit}
+          />
+        )}
+        {currentView === View.FindJobs && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {(USE_FIREBASE ? jobs : mockJobs).map(job => (
+                <JobCard 
+                    key={job.id} 
+                    job={job} 
+                    navigateTo={navigateTo}
+                    currentUser={activeCurrentUser}
+                    requestLoginForAction={requestLoginForAction}
+                />
+            ))}
+            {(USE_FIREBASE ? jobs : mockJobs).length === 0 && <p className="col-span-full text-center text-neutral-medium dark:text-dark-textMuted">ยังไม่มีประกาศงานในระบบ</p>}
+            </div>
+        )}
+        {currentView === View.FindHelpers && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {(USE_FIREBASE ? helperProfiles : mockHelperProfiles).map(profile => {
+                 const user = (USE_FIREBASE ? users : mockUsers).find(u => u.id === profile.userId);
+                 const enrichedProfile: EnrichedHelperProfile = {
+                    ...profile,
+                    userPhoto: user?.photo,
+                    userAddress: user?.address,
+                    userDisplayName: user?.displayName || profile.username,
+                    profileCompleteBadge: user ? checkProfileCompleteness(user) : false,
+                    warningBadge: profile.isSuspicious || false,
+                    verifiedExperienceBadge: profile.adminVerifiedExperience || false,
+                 };
+                return (
+                    <HelperCard 
+                        key={profile.id} 
+                        profile={enrichedProfile} 
+                        onNavigateToPublicProfile={handleNavigateToPublicProfile}
+                        navigateTo={navigateTo}
+                        onLogHelperContact={handleLogHelperContactInteraction}
+                        currentUser={activeCurrentUser}
+                        requestLoginForAction={requestLoginForAction}
+                    />
+                );
+            })}
+            {(USE_FIREBASE ? helperProfiles : mockHelperProfiles).length === 0 && <p className="col-span-full text-center text-neutral-medium dark:text-dark-textMuted">ยังไม่มีโปรไฟล์ผู้ช่วยในระบบ</p>}
+            </div>
+        )}
+        {currentView === View.Login && <LoginForm onLogin={handleLogin} onSwitchToRegister={() => navigateTo(View.Register)} />}
+        {currentView === View.Register && <RegistrationForm onRegister={handleRegister} onSwitchToLogin={() => navigateTo(View.Login)} />}
+        {currentView === View.AdminDashboard && activeCurrentUser?.role === UserRole.Admin && (
+            <AdminDashboard
+                jobs={USE_FIREBASE ? jobs : mockJobs}
+                helperProfiles={USE_FIREBASE ? helperProfiles : mockHelperProfiles}
+                users={USE_FIREBASE ? users : mockUsers}
+                interactions={USE_FIREBASE ? interactions : mockInteractions}
+                webboardPosts={USE_FIREBASE ? webboardPosts : mockWebboardPosts}
+                webboardComments={USE_FIREBASE ? webboardComments : mockWebboardComments}
+                onDeleteJob={handleDeleteJob}
+                onDeleteHelperProfile={handleDeleteHelperProfile}
+                onToggleSuspiciousJob={handleToggleSuspiciousJob}
+                onToggleSuspiciousHelperProfile={handleToggleSuspiciousHelperProfile}
+                onTogglePinnedJob={handleTogglePinnedJob}
+                onTogglePinnedHelperProfile={handleTogglePinnedHelperProfile}
+                onToggleHiredJob={handleToggleHiredJobForUserOrAdmin}
+                onToggleUnavailableHelperProfile={handleToggleUnavailableHelperProfileForUserOrAdmin}
+                onToggleVerifiedExperience={handleToggleVerifiedExperience}
+                onDeleteWebboardPost={handleDeleteWebboardPost}
+                onPinWebboardPost={handlePinWebboardPost}
+                onStartEditItem={handleStartEditItemFromAdmin}
+                onSetUserRole={handleSetUserRole}
+                currentUser={activeCurrentUser}
+                isSiteLocked={USE_FIREBASE ? isSiteLocked : mockIsSiteLocked}
+                onToggleSiteLock={handleToggleSiteLock}
             />
-          ))}
-        </div>
-      )}
-    </div>
-    );
-  };
-
-  const renderRegister = () => <RegistrationForm onRegister={handleRegister} onSwitchToLogin={() => navigateTo(View.Login)} />;
-  const renderLogin = () => <LoginForm onLogin={handleLogin} onSwitchToRegister={() => navigateTo(View.Register)} />;
-
-  const renderUserProfile = () => {
-    if (!currentUser) {
-      setTimeout(() => navigateTo(View.Login), 0);
-      return <p className="text-center p-8">กำลังเปลี่ยนเส้นทางไปยังหน้าเข้าสู่ระบบ...</p>;
-    }
-    return <UserProfilePage currentUser={currentUser} onUpdateProfile={handleUpdateUserProfile} onCancel={() => navigateTo(View.Home)} />;
-  };
-
-  const renderAdminDashboard = () => {
-    if (!currentUser || !currentUser.isAdmin) {
-      setTimeout(() => navigateTo(View.Home), 0);
-      return <p className="text-center p-8">คุณไม่มีสิทธิ์เข้าถึงหน้านี้ กำลังเปลี่ยนเส้นทาง...</p>;
-    }
-    return (
-      <AdminDashboard
-        jobs={jobs}
-        helperProfiles={helperProfiles}
-        users={users}
-        interactions={interactions}
-        onDeleteJob={handleDeleteJob}
-        onDeleteHelperProfile={handleDeleteHelperProfile}
-        onToggleSuspiciousJob={handleToggleSuspiciousJob}
-        onToggleSuspiciousHelperProfile={handleToggleSuspiciousHelperProfile}
-        onTogglePinnedJob={handleTogglePinnedJob}
-        onTogglePinnedHelperProfile={handleTogglePinnedHelperProfile}
-        onToggleHiredJob={handleToggleHiredJobForUserOrAdmin}
-        onToggleUnavailableHelperProfile={handleToggleUnavailableHelperProfileForUserOrAdmin}
-        onToggleVerifiedExperience={handleToggleVerifiedExperience}
-        onStartEditItem={handleStartEditItemFromAdmin}
-        currentUser={currentUser}
-      />
-    );
-  };
-
-  const renderMyPostsPage = () => {
-    if (!currentUser || currentUser.isAdmin) { // Admins use AdminDashboard
-        setTimeout(() => navigateTo(View.Home), 0);
-        return <p className="text-center p-8">กำลังเปลี่ยนเส้นทาง...</p>;
-    }
-    return (
-        <MyPostsPage
-            currentUser={currentUser}
-            jobs={jobs}
-            helperProfiles={helperProfiles}
+        )}
+        {currentView === View.MyPosts && activeCurrentUser && (
+          <MyPostsPage 
+            currentUser={activeCurrentUser}
+            jobs={USE_FIREBASE ? jobs : mockJobs}
+            helperProfiles={USE_FIREBASE ? helperProfiles : mockHelperProfiles}
+            webboardPosts={USE_FIREBASE ? webboardPosts : mockWebboardPosts}
+            webboardComments={USE_FIREBASE ? webboardComments : mockWebboardComments}
             onEditItem={handleStartEditMyItem}
             onDeleteItem={handleDeleteItemFromMyPosts}
             onToggleHiredStatus={handleToggleItemStatusFromMyPosts}
             navigateTo={navigateTo}
-        />
-    );
-  };
-  
-  const renderAboutUsPage = () => <AboutUsPage />;
-  const renderSafetyPage = () => <SafetyPage />; 
+            getUserDisplayBadge={(user, posts, comments) => getUserDisplayBadge(user, posts, comments)}
+          />
+        )}
+        {currentView === View.UserProfile && activeCurrentUser && (
+          <UserProfilePage 
+            currentUser={activeCurrentUser} 
+            onUpdateProfile={handleUpdateUserProfile} 
+            onCancel={() => navigateTo(View.Home)} 
+          />
+        )}
+        {currentView === View.AboutUs && <AboutUsPage />}
+        {currentView === View.Safety && <SafetyPage />}
+        {currentView === View.PublicProfile && viewingProfileId && (
+            (() => {
+                const userToView = (USE_FIREBASE ? users : mockUsers).find(u => u.id === viewingProfileId);
+                const helperProfileForUser = (USE_FIREBASE ? helperProfiles : mockHelperProfiles).find(hp => hp.userId === viewingProfileId);
+                if (userToView) {
+                    return (
+                        <PublicProfilePage 
+                            user={userToView} 
+                            helperProfile={helperProfileForUser} 
+                            onBack={() => navigateTo(View.FindHelpers)}
+                            currentUser={activeCurrentUser}
+                        />
+                    );
+                }
+                return <p className="text-center text-neutral-medium dark:text-dark-textMuted">ไม่พบโปรไฟล์ผู้ใช้</p>;
+            })()
+        )}
+        {currentView === View.Webboard && (
+           <WebboardPage
+                currentUser={activeCurrentUser}
+                users={USE_FIREBASE ? users : mockUsers}
+                posts={USE_FIREBASE ? webboardPosts : mockWebboardPosts}
+                comments={USE_FIREBASE ? webboardComments : mockWebboardComments}
+                onAddOrUpdatePost={handleAddOrUpdateWebboardPost}
+                onAddComment={handleAddWebboardComment}
+                onToggleLike={handleToggleWebboardPostLike}
+                onDeletePost={handleDeleteWebboardPost}
+                onPinPost={handlePinWebboardPost}
+                onEditPost={(postToEdit) => { 
+                    setItemToEdit({ ...postToEdit, isEditing: true }); 
+                    setEditingItemType('webboardPost');
+                    setSelectedPostId('create'); // This will open the modal
+                }}
+                selectedPostId={selectedPostId}
+                setSelectedPostId={setSelectedPostId}
+                navigateTo={navigateTo}
+                editingPost={editingItemType === 'webboardPost' ? itemToEdit as WebboardPost : undefined}
+                onCancelEdit={() => { setItemToEdit(null); setEditingItemType(null); }}
+                getUserDisplayBadge={(user, posts, comments) => getUserDisplayBadge(user, posts, comments)}
+                requestLoginForAction={requestLoginForAction}
+           />
+        )}
 
-  const renderPublicProfile = () => {
-    if (!viewingProfileId) {
-      navigateTo(View.Home); 
-      return <p className="text-center p-8">Loading profile...</p>;
-    }
-    const profileUser = users.find(u => u.id === viewingProfileId);
-    if (!profileUser) {
-      return <p className="text-center p-8 text-red-500">ไม่พบโปรไฟล์ผู้ใช้</p>;
-    }
-    const displayUser: User = {
-        ...profileUser,
-        profileComplete: checkProfileCompleteness(profileUser),
-        hasBeenContacted: checkHasBeenContacted(profileUser.id, interactions),
-    };
-    const helperProfileForBio = helperProfiles.find(hp => hp.userId === viewingProfileId);
-    return <PublicProfilePage user={displayUser} helperProfile={helperProfileForBio} onBack={() => navigateTo(View.FindHelpers)} />;
-  };
-
-  let currentViewContent;
-  switch (currentView) {
-    case View.Home: currentViewContent = renderHome(); break;
-    case View.PostJob: currentViewContent = renderPostJob(); break;
-    case View.FindJobs: currentViewContent = renderFindJobs(); break;
-    case View.OfferHelp: currentViewContent = renderOfferHelpForm(); break;
-    case View.FindHelpers: currentViewContent = renderFindHelpers(); break;
-    case View.Register: currentViewContent = renderRegister(); break;
-    case View.Login: currentViewContent = renderLogin(); break;
-    case View.AdminDashboard: currentViewContent = renderAdminDashboard(); break;
-    case View.MyPosts: currentViewContent = renderMyPostsPage(); break;
-    case View.UserProfile: currentViewContent = renderUserProfile(); break;
-    case View.AboutUs: currentViewContent = renderAboutUsPage(); break;
-    case View.PublicProfile: currentViewContent = renderPublicProfile(); break;
-    case View.Safety: currentViewContent = renderSafetyPage(); break;
-    default: currentViewContent = renderHome();
-  }
-
-  return (
-    <div className="flex flex-col flex-1 bg-neutral-light dark:bg-dark-pageBg">
-      {renderHeader()}
-      <main className="flex-1 overflow-y-auto pt-20 sm:pt-24"> 
-        {currentViewContent}
       </main>
       <ConfirmModal
         isOpen={isConfirmModalOpen}
@@ -1078,46 +1921,14 @@ const App: React.FC = () => {
         message={confirmModalMessage}
       />
       <FeedbackForm
-          isOpen={isFeedbackModalOpen}
-          onClose={() => {
-              setIsFeedbackModalOpen(false);
-              if (feedbackSubmissionStatus !== 'success') {
-                setFeedbackSubmissionStatus('idle');
-                setFeedbackSubmissionMessage(null);
-              }
-          }}
-          onSubmit={handleFeedbackSubmit}
-          submissionStatus={feedbackSubmissionStatus}
-          submissionMessage={feedbackSubmissionMessage}
+        isOpen={isFeedbackModalOpen}
+        onClose={() => setIsFeedbackModalOpen(false)}
+        onSubmit={handleFeedbackSubmit}
+        submissionStatus={feedbackSubmissionStatus}
+        submissionMessage={feedbackSubmissionMessage}
       />
-      {feedbackSubmissionStatus === 'success' && feedbackSubmissionMessage && !isFeedbackModalOpen && (
-          <div
-              className="fixed bottom-24 sm:bottom-5 right-5 p-3 rounded-md shadow-lg text-sm font-medium z-[60] transition-opacity duration-300 ease-in-out bg-green-100 dark:bg-green-700/80 border border-green-300 dark:border-green-500 text-green-700 dark:text-green-200"
-              role="alert"
-          >
-              {feedbackSubmissionMessage}
-          </div>
-      )}
-      <footer className="bg-headerBlue-DEFAULT dark:bg-dark-headerBg text-neutral-dark dark:text-dark-text p-4 mt-auto font-normal flex flex-col items-center">
-        <div className="container mx-auto flex flex-row flex-wrap justify-center items-center gap-x-1 sm:gap-x-2 gap-y-1 text-xs sm:text-sm">
-            <button onClick={() => navigateTo(View.AboutUs)} className="px-1.5 py-0.5 sm:px-2 sm:py-1 hover:text-primary dark:hover:text-dark-primary-hover transition-colors">เกี่ยวกับเรา</button>
-            <span className="text-neutral-medium dark:text-dark-textMuted inline">|</span>
-            <button onClick={() => navigateTo(View.Safety)} className="px-1.5 py-0.5 sm:px-2 sm:py-1 hover:text-primary dark:hover:text-dark-primary-hover transition-colors">โปรดอ่านเพื่อความปลอดภัย</button>
-            <span className="text-neutral-medium dark:text-dark-textMuted inline">|</span>
-            <button
-                onClick={() => { setIsFeedbackModalOpen(true); if(feedbackSubmissionStatus === 'error') { setFeedbackSubmissionStatus('idle'); setFeedbackSubmissionMessage(null);}}}
-                className="px-1.5 py-0.5 sm:px-2 sm:py-1 hover:text-primary dark:hover:text-dark-primary-hover transition-colors"
-            >อยากให้เราปรับปรุงอะไร?</button>
-        </div>
-      </footer>
-      <button
-        onClick={toggleTheme}
-        className="fixed bottom-5 right-5 z-40 p-3 rounded-full text-lg shadow-xl hover:scale-105 transform transition-all duration-150 ease-in-out bg-primary text-neutral-dark hover:bg-primary-hover dark:bg-dark-primary-DEFAULT dark:text-dark-textOnPrimaryDark dark:hover:bg-dark-primary-hover"
-        aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-      >
-        {theme === 'light' ? '🌙' : '☀️'}
-      </button>
-    </div>
+      <Footer />
+    </>
   );
 };
 

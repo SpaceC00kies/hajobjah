@@ -1,11 +1,11 @@
 
-import React, { useState } from 'react';
-import type { User } from '../types'; // User type from your definitions
+import React, { useState, useEffect } from 'react';
+import type { User } from '../types';
 import { GenderOption, HelperEducationLevelOption } from '../types';
 import { Button } from './Button';
 
 interface RegistrationFormProps {
-  onRegister: (userData: Omit<User, 'id' | 'isAdmin' | 'photoURL' | 'address' | 'createdAt' | 'profileComplete' | 'hasBeenContacted' | 'favoriteMusic' | 'favoriteBook' | 'favoriteMovie' | 'hobbies' | 'favoriteFood' | 'dislikedThing' | 'introSentence'> & { password: string }) => Promise<boolean>;
+  onRegister: (userData: Omit<User, 'id' | 'hashedPassword' | 'isAdmin' | 'photo' | 'address' | 'userLevel' | 'profileComplete' | 'role' | 'isMuted' | 'isFrozen'> & { password: string }) => Promise<boolean>; // Returns true on success
   onSwitchToLogin: () => void;
 }
 
@@ -15,8 +15,8 @@ type RegistrationFormErrorKeys =
 
 const isValidThaiMobileNumber = (mobile: string): boolean => {
   if (!mobile) return false;
-  const cleaned = mobile.replace(/[\s-]/g, '');
-  return /^0[689]\d{8}$/.test(cleaned);
+  const cleaned = mobile.replace(/[\s-]/g, ''); // Remove spaces and hyphens
+  return /^0[689]\d{8}$/.test(cleaned); // 10 digits, starting 06, 08, 09
 };
 
 const calculateAge = (birthdateString?: string): number | null => {
@@ -33,6 +33,15 @@ const calculateAge = (birthdateString?: string): number | null => {
   return age;
 };
 
+interface PasswordCriteria {
+  length: boolean;
+  uppercase: boolean;
+  lowercase: boolean;
+  number: boolean;
+  symbol: boolean;
+}
+
+const SYMBOL_REGEX = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~]/;
 
 export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onRegister, onSwitchToLogin }) => {
   const [displayName, setDisplayName] = useState('');
@@ -47,13 +56,19 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onRegister, 
   const [birthdate, setBirthdate] = useState('');
   const [educationLevel, setEducationLevel] = useState<HelperEducationLevelOption | undefined>(undefined);
   const [currentAge, setCurrentAge] = useState<number | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [errors, setErrors] = useState<Partial<Record<RegistrationFormErrorKeys, string>>>({});
+  const [passwordCriteria, setPasswordCriteria] = useState<PasswordCriteria>({
+    length: false,
+    uppercase: false,
+    lowercase: false,
+    number: false,
+    symbol: false,
+  });
 
-  const inputBaseStyle = "w-full p-3 bg-white dark:bg-dark-inputBg border border-[#CCCCCC] dark:border-dark-border rounded-[10px] text-neutral-dark dark:text-dark-text font-normal focus:outline-none";
-  const inputFocusStyle = "focus:border-primary dark:focus:border-dark-primary-DEFAULT focus:ring-1 focus:ring-primary/50 dark:focus:ring-dark-primary-DEFAULT/50";
-  const inputErrorStyle = "border-red-500 dark:border-red-400 focus:border-red-500 dark:focus:border-red-400 focus:ring-1 focus:ring-red-500/50 dark:focus:ring-red-400/50";
+  const inputBaseStyle = "w-full p-3 bg-white dark:bg-dark-inputBg border border-[#CCCCCC] dark:border-dark-border rounded-[10px] text-neutral-dark dark:text-dark-text font-serif font-normal focus:outline-none";
+  const inputFocusStyle = "focus:border-brandGreen dark:focus:border-dark-brandGreen-DEFAULT focus:ring-2 focus:ring-brandGreen focus:ring-opacity-70 dark:focus:ring-dark-brandGreen-DEFAULT dark:focus:ring-opacity-70";
+  const inputErrorStyle = "border-red-500 dark:border-red-400 focus:border-red-500 dark:focus:border-red-400 focus:ring-2 focus:ring-red-500 focus:ring-opacity-70 dark:focus:ring-red-400 dark:focus:ring-opacity-70";
   const selectBaseStyle = `${inputBaseStyle} appearance-none`;
   
   const handleBirthdateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -66,6 +81,17 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onRegister, 
     }
   };
 
+  useEffect(() => {
+    const newCriteria: PasswordCriteria = {
+      length: password.length >= 9 && password.length <= 12,
+      uppercase: /[A-Z]/.test(password),
+      lowercase: /[a-z]/.test(password),
+      number: /[0-9]/.test(password),
+      symbol: SYMBOL_REGEX.test(password),
+    };
+    setPasswordCriteria(newCriteria);
+  }, [password]);
+
   const validateForm = () => {
     const newErrors: Partial<Record<RegistrationFormErrorKeys, string>> = {};
     if (!displayName.trim()) newErrors.displayName = 'กรุณากรอกชื่อที่ต้องการให้แสดง';
@@ -76,8 +102,19 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onRegister, 
     if (!email.trim()) newErrors.email = 'กรุณากรอกอีเมล';
     else if (!/\S+@\S+\.\S+/.test(email)) newErrors.email = 'รูปแบบอีเมลไม่ถูกต้อง';
     
-    if (!password) newErrors.password = 'กรุณากรอกรหัสผ่าน';
-    else if (password.length < 6) newErrors.password = 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร';
+    if (!password) {
+      newErrors.password = 'กรุณากรอกรหัสผ่าน';
+    } else {
+      const criteriaMessages = [];
+      if (!passwordCriteria.length) criteriaMessages.push('ความยาว 9-12 ตัวอักษร');
+      if (!passwordCriteria.uppercase) criteriaMessages.push('ตัวพิมพ์ใหญ่ (A-Z)');
+      if (!passwordCriteria.lowercase) criteriaMessages.push('ตัวพิมพ์เล็ก (a-z)');
+      if (!passwordCriteria.number) criteriaMessages.push('ตัวเลข (0-9)');
+      if (!passwordCriteria.symbol) criteriaMessages.push('สัญลักษณ์พิเศษ');
+      if (criteriaMessages.length > 0) {
+        newErrors.password = `รหัสผ่านต้องประกอบด้วย: ${criteriaMessages.join(', ')}`;
+      }
+    }
     
     if (password !== confirmPassword) newErrors.confirmPassword = 'รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน';
 
@@ -86,9 +123,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onRegister, 
     
     if (!gender) newErrors.gender = 'กรุณาเลือกเพศ';
     if (!birthdate) newErrors.birthdate = 'กรุณาเลือกวันเกิด';
-    else if (calculateAge(birthdate) === null || (calculateAge(birthdate) !== null && calculateAge(birthdate)! < 15) ) {
-         newErrors.birthdate = 'กรุณาเลือกวันเกิดที่ถูกต้อง (ต้องไม่ใช่วันในอนาคต และอายุไม่ต่ำกว่า 15 ปี)';
-    }
+    else if (calculateAge(birthdate) === null) newErrors.birthdate = 'กรุณาเลือกวันเกิดที่ถูกต้อง (ต้องไม่ใช่วันในอนาคต)';
 
     if (!educationLevel || educationLevel === HelperEducationLevelOption.NotStated) newErrors.educationLevel = 'กรุณาเลือกระดับการศึกษา';
 
@@ -101,76 +136,105 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onRegister, 
     setErrors({}); 
     if (!validateForm()) return;
 
-    setIsSubmitting(true);
     const success = await onRegister({ 
-        displayName, username, email, password, mobile, lineId, facebook,
-        gender, birthdate, educationLevel
+        displayName, 
+        username, 
+        email, 
+        password, 
+        mobile, 
+        lineId, 
+        facebook,
+        gender, 
+        birthdate, 
+        educationLevel,
     });
-    setIsSubmitting(false);
-
     if (success) {
-      setDisplayName(''); setUsername(''); setEmail(''); setPassword('');
-      setConfirmPassword(''); setMobile(''); setLineId(''); setFacebook('');
-      setGender(undefined); setBirthdate(''); setEducationLevel(undefined); setCurrentAge(null);
-    } else {
-      // Error message is shown by App.tsx alert from onRegister
+      setDisplayName('');
+      setUsername('');
+      setEmail('');
+      setPassword('');
+      setConfirmPassword('');
+      setMobile('');
+      setLineId('');
+      setFacebook('');
+      setGender(undefined);
+      setBirthdate('');
+      setEducationLevel(undefined);
+      setCurrentAge(null);
+      setPasswordCriteria({ length: false, uppercase: false, lowercase: false, number: false, symbol: false });
     }
   };
 
+  const PasswordCriteriaDisplay: React.FC<{ criteria: PasswordCriteria }> = ({ criteria }) => {
+    const getItemClass = (isMet: boolean) => isMet ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400';
+    const getIcon = (isMet: boolean) => isMet ? '✓' : '✗';
+
+    return (
+      <ul className="text-xs font-sans mt-1 space-y-0.5">
+        <li className={getItemClass(criteria.length)}>{getIcon(criteria.length)} ความยาว 9-12 ตัวอักษร</li>
+        <li className={getItemClass(criteria.uppercase)}>{getIcon(criteria.uppercase)} มีตัวพิมพ์ใหญ่ (A-Z)</li>
+        <li className={getItemClass(criteria.lowercase)}>{getIcon(criteria.lowercase)} มีตัวพิมพ์เล็ก (a-z)</li>
+        <li className={getItemClass(criteria.number)}>{getIcon(criteria.number)} มีตัวเลข (0-9)</li>
+        <li className={getItemClass(criteria.symbol)}>{getIcon(criteria.symbol)} มีสัญลักษณ์พิเศษ (เช่น !@#$)</li>
+      </ul>
+    );
+  };
+
+
   return (
     <div className="bg-white dark:bg-dark-cardBg p-8 rounded-xl shadow-2xl w-full max-w-lg mx-auto my-10 border border-neutral-DEFAULT dark:border-dark-border">
-      <h2 className="text-3xl font-semibold text-primary dark:text-dark-primary-DEFAULT mb-6 text-center">สร้างบัญชีใหม่</h2>
+      <h2 className="text-3xl font-sans font-semibold text-brandGreen dark:text-dark-brandGreen-DEFAULT mb-6 text-center">สร้างบัญชีใหม่</h2>
       <form onSubmit={handleSubmit} className="space-y-5">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div>
-            <label htmlFor="displayName" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">ชื่อ (สำหรับแสดงผล) <span className="text-red-500 dark:text-red-400">*</span></label>
+            <label htmlFor="displayName" className="block text-sm font-sans font-medium text-neutral-dark dark:text-dark-text mb-1">ชื่อ (สำหรับแสดงผล) <span className="text-red-500 dark:text-red-400">*</span></label>
             <input type="text" id="displayName" value={displayName} onChange={(e) => setDisplayName(e.target.value)}
                     className={`${inputBaseStyle} ${errors.displayName ? inputErrorStyle : inputFocusStyle}`} placeholder="เช่น สมชาย ใจดี"/>
-            {errors.displayName && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.displayName}</p>}
+            {errors.displayName && <p className="text-red-500 font-sans dark:text-red-400 text-xs mt-1">{errors.displayName}</p>}
             </div>
             <div>
-            <label htmlFor="username" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">ชื่อผู้ใช้ (สำหรับเข้าระบบ) <span className="text-red-500 dark:text-red-400">*</span></label>
+            <label htmlFor="username" className="block text-sm font-sans font-medium text-neutral-dark dark:text-dark-text mb-1">ชื่อผู้ใช้ (สำหรับเข้าระบบ) <span className="text-red-500 dark:text-red-400">*</span></label>
             <input type="text" id="username" value={username} onChange={(e) => setUsername(e.target.value.toLowerCase())}
                     className={`${inputBaseStyle} ${errors.username ? inputErrorStyle : inputFocusStyle}`} placeholder="เช่น somchai_j"/>
-            {errors.username && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.username}</p>}
+            {errors.username && <p className="text-red-500 font-sans dark:text-red-400 text-xs mt-1">{errors.username}</p>}
             </div>
         </div>
         
         <div>
-          <label htmlFor="email" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">อีเมล <span className="text-red-500 dark:text-red-400">*</span></label>
+          <label htmlFor="email" className="block text-sm font-sans font-medium text-neutral-dark dark:text-dark-text mb-1">อีเมล <span className="text-red-500 dark:text-red-400">*</span></label>
           <input type="email" id="email" value={email} onChange={(e) => setEmail(e.target.value)}
                  className={`${inputBaseStyle} ${errors.email ? inputErrorStyle : inputFocusStyle}`} placeholder="เช่น user@example.com"/>
-          {errors.email && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.email}</p>}
+          {errors.email && <p className="text-red-500 font-sans dark:text-red-400 text-xs mt-1">{errors.email}</p>}
         </div>
 
         <div className="pt-3 mt-3 border-t border-neutral-DEFAULT/50 dark:border-dark-border/30">
-             <h3 className="text-md font-medium text-neutral-dark dark:text-dark-text mb-2">ข้อมูลส่วนตัว</h3>
+             <h3 className="text-md font-sans font-medium text-neutral-dark dark:text-dark-text mb-2">ข้อมูลส่วนตัว</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                  <div>
-                    <label className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">เพศ <span className="text-red-500 dark:text-red-400">*</span></label>
+                    <label className="block text-sm font-sans font-medium text-neutral-dark dark:text-dark-text mb-1">เพศ <span className="text-red-500 dark:text-red-400">*</span></label>
                     <div className="space-y-1">
                         {Object.values(GenderOption).map(optionValue => (
                         <label key={optionValue} className="flex items-center space-x-2 cursor-pointer">
                             <input type="radio" name="gender" value={optionValue} checked={gender === optionValue} 
                                     onChange={() => setGender(optionValue)}
-                                    className="form-radio h-4 w-4 text-primary dark:text-dark-primary-DEFAULT border-[#CCCCCC] dark:border-dark-border focus:ring-primary dark:focus:ring-dark-primary-DEFAULT"/>
-                            <span className="text-neutral-dark dark:text-dark-text font-normal text-sm">{optionValue}</span>
+                                    className="form-radio h-4 w-4 text-brandGreen dark:text-dark-brandGreen-DEFAULT border-[#CCCCCC] dark:border-dark-border focus:ring-brandGreen dark:focus:ring-dark-brandGreen-DEFAULT"/>
+                            <span className="text-neutral-dark font-sans dark:text-dark-text font-normal text-sm">{optionValue}</span>
                         </label>
                         ))}
                     </div>
-                    {errors.gender && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.gender}</p>}
+                    {errors.gender && <p className="text-red-500 font-sans dark:text-red-400 text-xs mt-1">{errors.gender}</p>}
                 </div>
                 <div>
-                    <label htmlFor="birthdate" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">วันเกิด <span className="text-red-500 dark:text-red-400">*</span></label>
+                    <label htmlFor="birthdate" className="block text-sm font-sans font-medium text-neutral-dark dark:text-dark-text mb-1">วันเกิด <span className="text-red-500 dark:text-red-400">*</span></label>
                     <input type="date" id="birthdate" value={birthdate} onChange={handleBirthdateChange}
-                           max={new Date().toISOString().split("T")[0]} 
+                           max={new Date().toISOString().split("T")[0]} // Prevent future dates
                            className={`${inputBaseStyle} ${errors.birthdate ? inputErrorStyle : inputFocusStyle}`} />
-                    {currentAge !== null && <p className="text-xs text-neutral-dark dark:text-dark-textMuted mt-1">อายุ: {currentAge} ปี</p>}
-                    {errors.birthdate && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.birthdate}</p>}
+                    {currentAge !== null && <p className="text-xs font-sans text-neutral-dark dark:text-dark-textMuted mt-1">อายุ: {currentAge} ปี</p>}
+                    {errors.birthdate && <p className="text-red-500 font-sans dark:text-red-400 text-xs mt-1">{errors.birthdate}</p>}
                 </div>
             </div>
             <div className="mt-4">
-                <label htmlFor="educationLevel" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">ระดับการศึกษา <span className="text-red-500 dark:text-red-400">*</span></label>
+                <label htmlFor="educationLevel" className="block text-sm font-sans font-medium text-neutral-dark dark:text-dark-text mb-1">ระดับการศึกษา <span className="text-red-500 dark:text-red-400">*</span></label>
                 <select id="educationLevel" value={educationLevel || ''} 
                         onChange={(e) => setEducationLevel(e.target.value as HelperEducationLevelOption)}
                         className={`${selectBaseStyle} ${errors.educationLevel ? inputErrorStyle : inputFocusStyle}`}>
@@ -179,56 +243,55 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onRegister, 
                         <option key={level} value={level}>{level}</option>
                     ))}
                 </select>
-                {errors.educationLevel && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.educationLevel}</p>}
+                {errors.educationLevel && <p className="text-red-500 font-sans dark:text-red-400 text-xs mt-1">{errors.educationLevel}</p>}
             </div>
         </div>
 
 
         <div className="pt-3 mt-3 border-t border-neutral-DEFAULT/50 dark:border-dark-border/30">
-          <h3 className="text-md font-medium text-neutral-dark dark:text-dark-text mb-2">ข้อมูลติดต่อ</h3>
+          <h3 className="text-md font-sans font-medium text-neutral-dark dark:text-dark-text mb-2">ข้อมูลติดต่อ</h3>
             <div>
-            <label htmlFor="mobile" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">เบอร์โทรศัพท์ <span className="text-red-500 dark:text-red-400">*</span></label>
+            <label htmlFor="mobile" className="block text-sm font-sans font-medium text-neutral-dark dark:text-dark-text mb-1">เบอร์โทรศัพท์ <span className="text-red-500 dark:text-red-400">*</span></label>
             <input type="tel" id="mobile" value={mobile} onChange={(e) => setMobile(e.target.value)}
                     className={`${inputBaseStyle} ${errors.mobile ? inputErrorStyle : inputFocusStyle}`} placeholder="เช่น 0812345678"/>
-            {errors.mobile && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.mobile}</p>}
+            {errors.mobile && <p className="text-red-500 font-sans dark:text-red-400 text-xs mt-1">{errors.mobile}</p>}
             </div>
             <div className="mt-4">
-            <label htmlFor="lineId" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">LINE ID (ถ้ามี)</label>
+            <label htmlFor="lineId" className="block text-sm font-sans font-medium text-neutral-dark dark:text-dark-text mb-1">LINE ID (ถ้ามี)</label>
             <input type="text" id="lineId" value={lineId} onChange={(e) => setLineId(e.target.value)}
                     className={`${inputBaseStyle} ${inputFocusStyle}`} placeholder="เช่น mylineid"/>
             </div>
             <div className="mt-4">
-            <label htmlFor="facebook" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">Facebook (ถ้ามี)</label>
+            <label htmlFor="facebook" className="block text-sm font-sans font-medium text-neutral-dark dark:text-dark-text mb-1">Facebook (ถ้ามี)</label>
             <input type="text" id="facebook" value={facebook} onChange={(e) => setFacebook(e.target.value)}
                     className={`${inputBaseStyle} ${inputFocusStyle}`} placeholder="ลิงก์โปรไฟล์ หรือชื่อ Facebook"/>
             </div>
         </div>
 
         <div className="pt-3 mt-3 border-t border-neutral-DEFAULT/50 dark:border-dark-border/30">
-            <h3 className="text-md font-medium text-neutral-dark dark:text-dark-text mb-2">ตั้งรหัสผ่าน</h3>
+            <h3 className="text-md font-sans font-medium text-neutral-dark dark:text-dark-text mb-2">ตั้งรหัสผ่าน</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
-                <label htmlFor="password" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">รหัสผ่าน <span className="text-red-500 dark:text-red-400">*</span></label>
+                <label htmlFor="password" className="block text-sm font-sans font-medium text-neutral-dark dark:text-dark-text mb-1">รหัสผ่าน <span className="text-red-500 dark:text-red-400">*</span></label>
                 <input type="password" id="password" value={password} onChange={(e) => setPassword(e.target.value)}
-                        className={`${inputBaseStyle} ${errors.password ? inputErrorStyle : inputFocusStyle}`} placeholder="อย่างน้อย 6 ตัวอักษร"/>
-                {errors.password && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.password}</p>}
+                        className={`${inputBaseStyle} ${errors.password ? inputErrorStyle : inputFocusStyle}`} placeholder="9-12 ตัวอักษร, ตัวใหญ่/เล็ก, เลข, สัญลักษณ์"/>
+                {errors.password && <p className="text-red-500 font-sans dark:text-red-400 text-xs mt-1">{errors.password}</p>}
+                <PasswordCriteriaDisplay criteria={passwordCriteria} />
                 </div>
                 <div>
-                <label htmlFor="confirmPassword" className="block text-sm font-medium text-neutral-dark dark:text-dark-text mb-1">ยืนยันรหัสผ่าน <span className="text-red-500 dark:text-red-400">*</span></label>
+                <label htmlFor="confirmPassword" className="block text-sm font-sans font-medium text-neutral-dark dark:text-dark-text mb-1">ยืนยันรหัสผ่าน <span className="text-red-500 dark:text-red-400">*</span></label>
                 <input type="password" id="confirmPassword" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
                         className={`${inputBaseStyle} ${errors.confirmPassword ? inputErrorStyle : inputFocusStyle}`} placeholder="กรอกรหัสผ่านอีกครั้ง"/>
-                {errors.confirmPassword && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.confirmPassword}</p>}
+                {errors.confirmPassword && <p className="text-red-500 font-sans dark:text-red-400 text-xs mt-1">{errors.confirmPassword}</p>}
                 </div>
             </div>
         </div>
 
-        {errors.general && <p className="text-red-500 dark:text-red-400 text-sm text-center">{errors.general}</p>}
-        <Button type="submit" variant="primary" size="lg" className="w-full mt-6" disabled={isSubmitting}>
-            {isSubmitting ? 'กำลังลงทะเบียน...' : 'ลงทะเบียน'}
-        </Button>
-        <p className="text-center text-sm text-neutral-dark dark:text-dark-textMuted font-normal">
+        {errors.general && <p className="text-red-500 font-sans dark:text-red-400 text-sm text-center">{errors.general}</p>}
+        <Button type="submit" variant="login" size="lg" className="w-full mt-6">ลงทะเบียน</Button>
+        <p className="text-center text-sm font-serif text-neutral-dark dark:text-dark-textMuted font-normal">
           มีบัญชีอยู่แล้ว?{' '}
-          <button type="button" onClick={onSwitchToLogin} className="font-medium text-primary dark:text-dark-primary-DEFAULT hover:underline">
+          <button type="button" onClick={onSwitchToLogin} className="font-sans font-medium text-brandGreen dark:text-dark-brandGreen-DEFAULT hover:underline">
             เข้าสู่ระบบที่นี่
           </button>
         </p>
